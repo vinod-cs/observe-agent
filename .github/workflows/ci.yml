@@ -1,0 +1,106 @@
+# AGENTV1 FILE START: native/compile checks plus isolated hosted-runner package validation.
+name: validation
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      release_tag:
+        type: string
+        default: v0.0.0-canary.ci
+permissions:
+  contents: read
+jobs:
+  native:
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.7'
+          cache: false
+      - run: go test ./...
+      - run: go vet ./...
+      - shell: bash
+        run: test -z "$(gofmt -l cmd internal tests)"
+      - run: go run ./cmd/observe-agent --check --config configs/agent.json
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./tests/release/windows.ps1
+      - if: runner.os == 'Linux'
+        run: bash tests/release/installers.sh
+  cross-build:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        include:
+          - {os: linux, arch: amd64, extension: ''}
+          - {os: linux, arch: arm64, extension: ''}
+          - {os: windows, arch: amd64, extension: '.exe'}
+          - {os: darwin, arch: arm64, extension: ''}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.7'
+          cache: false
+      - shell: bash
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: '0'
+        run: |
+          mkdir -p "dist/bin/compile-check/${GOOS}_${GOARCH}"
+          go build ./...
+          go build -trimpath -ldflags "-X github.com/agent-i/agent/internal/version.Version=validation-${GITHUB_SHA}" -o "dist/bin/compile-check/${GOOS}_${GOARCH}/observe-agent${{ matrix.extension }}" ./cmd/observe-agent
+          sha256sum "dist/bin/compile-check/${GOOS}_${GOARCH}/"*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compile-preview-not-for-installation-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/bin/compile-check/
+  package:
+    # Ephemeral GitHub-hosted Linux VM only; never use a customer/self-hosted runner.
+    runs-on: ubuntu-24.04
+    needs: [native, cross-build]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.7'
+          cache: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build supported release assets
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || 'v0.0.0-canary.ci' }}
+        run: bash scripts/build-release.sh "$RELEASE_TAG"
+      - name: Verify manifest and exercise real systemd lifecycle
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || 'v0.0.0-canary.ci' }}
+        run: |
+          (cd "dist/packages/$RELEASE_TAG" && sha256sum --check SHA256SUMS)
+          sudo install -d /opt/deb-test
+          sudo cp packaging/deb/* /opt/deb-test/
+          sudo cp "dist/packages/$RELEASE_TAG/observe-agent_linux_amd64.deb" /opt/observe-agent.deb
+          sudo env OBSERVE_DEB_TEST_ONLY=yes bash /opt/deb-test/validate.sh
+          sudo env OBSERVE_DEB_TEST_ONLY=yes bash tests/release/bootstrap.sh "$RELEASE_TAG" "$PWD" "$PWD/dist/packages/$RELEASE_TAG"
+          # Package-version fixture tests dpkg upgrade semantics without fetching old releases.
+          sh packaging/deb/build.sh '0~upgradefixture' "dist/bin/$RELEASE_TAG/linux_amd64/observe-agent" dist/upgrade-fixture
+          sudo env OBSERVE_DEB_TEST_ONLY=yes bash tests/release/upgrade.sh dist/upgrade-fixture/observe-agent_0~upgradefixture_amd64.deb "dist/packages/$RELEASE_TAG/observe-agent_linux_amd64.deb"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: validated-packages-${{ github.sha }}
+          path: dist/packages/${{ inputs.release_tag || 'v0.0.0-canary.ci' }}/
+          if-no-files-found: error
+# AGENTV1 FILE END

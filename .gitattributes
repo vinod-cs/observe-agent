@@ -1,0 +1,9 @@
+# AGENTV1 FILE START: Linux executable sources must survive Windows checkout.
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+packaging/deb/postinst text eol=lf
+packaging/deb/prerm text eol=lf
+packaging/deb/postrm text eol=lf
+*.ps1 text eol=lf
+# AGENTV1 FILE END

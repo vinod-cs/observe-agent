@@ -1,0 +1,33 @@
+# AGENTV1 FILE START: protected metrics-only canary package configuration.
+# Configure endpoint and one authentication mode, then run --check and start.
+observe:
+  # Non-secret logical deployment IDs. Keep stable across URLs and API-key rotation.
+  backend_id: ""
+  organization_id: ""
+  # Migration only if a v1 queue still belongs to a different original endpoint:
+  # previous_endpoint: "https://<original-endpoint>/api/v1/otlp"
+  endpoint: ""
+  api_key: ""
+  # Safer: raw key (or full ApiKey header) in this environment variable.
+  # api_key_env: OBSERVE_API_KEY
+  # Or a service-readable root-owned 0640 secret file (raw key/header).
+  # api_key_file: /etc/observe-agent/api-key
+
+collection:
+  metrics:
+    enabled: true
+  logs:
+    enabled: false
+  traces:
+    enabled: false
+
+# On EC2 use required: true if metadata availability must be mandatory.
+ec2_metadata:
+  enabled: true
+  required: false
+  timeout_seconds: 2
+
+delivery:
+  state_directory: /var/lib/observe-agent/metrics
+  overflow_policy: reject_new
+# AGENTV1 FILE END

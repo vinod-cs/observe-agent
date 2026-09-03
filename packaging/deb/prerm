@@ -1,0 +1,9 @@
+#!/bin/sh
+# AGENTV1 FILE START: stop this service only; never touch agent-i or retained state.
+set -eu
+case "${1:-}" in
+ remove|upgrade|deconfigure)
+  if test -d /run/systemd/system; then systemctl stop observe-agent.service; fi
+  ;;
+esac
+# AGENTV1 FILE END

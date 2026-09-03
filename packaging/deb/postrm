@@ -1,0 +1,14 @@
+#!/bin/sh
+# AGENTV1 FILE START: preserve telemetry state/account even on explicit purge.
+set -eu
+case "${1:-}" in
+ remove|purge)
+  if test -d /run/systemd/system; then
+    systemctl disable observe-agent.service >/dev/null 2>&1 || true
+    systemctl daemon-reload
+  fi
+  ;;
+esac
+# dpkg --remove retains its YAML conffile. --purge deletes that conffile only.
+# Spool, account, and operator-created env/key files are intentionally retained.
+# AGENTV1 FILE END

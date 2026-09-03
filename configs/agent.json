@@ -1,0 +1,19 @@
+{
+  "agent_id": "",
+  "exporter": {
+    "backend_id": "example-backend",
+    "organization_id": "example-organization",
+    "type": "otlp_http",
+    "endpoint": "https://ingest.example.invalid/api/v1/otlp",
+    "headers_env": {"Authorization": "OBSERVE_AUTHORIZATION"}
+  },
+  "policy": {
+    "version": 1,
+    "enabled": {"metrics": true, "logs": false, "traces": false, "processes": false, "containers": false}
+  },
+  "remote_allowed": [],
+  "collection": {"interval_seconds": 15, "max_points": 4096, "max_devices": 128, "max_interfaces": 64, "max_mounts": 64},
+  "ec2_metadata": {"enabled": true, "required": false, "timeout_seconds": 2},
+  "delivery": {"batch_points": 500, "queue_items": 64, "max_attempts": 4, "request_timeout_seconds": 15, "state_directory": "/var/lib/observe-agent/metrics", "overflow_policy": "reject_new"},
+  "limits": {"request_bytes": 4194304, "queue_bytes": 67108864, "memory_mib": 128, "shutdown_seconds": 15}
+}

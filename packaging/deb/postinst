@@ -1,0 +1,32 @@
+#!/bin/sh
+# AGENTV1 FILE START: create dedicated identity and private state; never autostart.
+set -eu
+case "${1:-}" in
+ configure)
+  if ! getent group observe-agent >/dev/null; then groupadd --system observe-agent; fi
+  if ! id observe-agent >/dev/null 2>&1; then
+    useradd --system --gid observe-agent --home-dir /var/lib/observe-agent --no-create-home --shell /usr/sbin/nologin observe-agent
+  fi
+  # Do not adopt an unrelated interactive account or symlinked directory.
+  test "$(id -u observe-agent)" -ne 0
+  test "$(id -u observe-agent)" -lt 1000
+  test "$(getent passwd observe-agent | cut -d: -f7)" = /usr/sbin/nologin
+  test "$(id -gn observe-agent)" = observe-agent
+  test "$(getent group observe-agent | cut -d: -f3)" -lt 1000
+  case "$(getent group observe-agent | cut -d: -f4)" in ''|observe-agent) :;; *) echo 'Unexpected credential-reader group members; refusing setup' >&2;exit 1;; esac
+  for p in /etc/observe-agent /var/lib/observe-agent /var/lib/observe-agent/metrics; do
+    test ! -L "$p" || { echo 'Unsafe Agent path; refusing setup' >&2; exit 1; }
+  done
+  install -d -o root -g observe-agent -m 0750 /etc/observe-agent
+  install -d -o observe-agent -g observe-agent -m 0700 /var/lib/observe-agent /var/lib/observe-agent/metrics
+  # Only file metadata changes: dpkg owns conffile content preservation.
+  if test -f /etc/observe-agent/agent.yaml; then
+    test ! -L /etc/observe-agent/agent.yaml
+    chown root:observe-agent /etc/observe-agent/agent.yaml
+    chmod 0640 /etc/observe-agent/agent.yaml
+  fi
+  if test -d /run/systemd/system; then systemctl daemon-reload; fi
+  echo 'Observe Agent installed (not started). Edit /etc/observe-agent/agent.yaml, run observe-agent --check --config /etc/observe-agent/agent.yaml, then systemctl start observe-agent.'
+  ;;
+esac
+# AGENTV1 FILE END
