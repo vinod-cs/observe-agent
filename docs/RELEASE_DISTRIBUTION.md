@@ -89,7 +89,7 @@ Windows requires Go on PATH and Docker Desktop with Linux containers. The defaul
 Get-Content ./dist/checksums/v0.1.0-canary.20260903.2/SHA256SUMS
 ```
 
-The PowerShell builder performs native cross-compilation, mounts the repo read-only into an ephemeral network-disabled Linux builder, and mounts only the version's package output writable. It never starts an installed Agent or touches an existing Docker stack. No script invokes gh, Git, commits or uploads. Both builders refuse pre-existing output directories to prevent stale assets mixing into a release. Review partial outputs before retrying; no automatic recursive cleanup of existing dist data occurs.
+The PowerShell builder performs native cross-compilation, mounts the repo read-only into an ephemeral network-disabled Linux builder, and mounts only the version's package output writable. It never starts an installed Agent or touches an existing Docker stack. Neither build script invokes gh, Git, commits or uploads; the separate Actions-only publisher is described below. Both builders refuse pre-existing output directories to prevent stale assets mixing into a release. Review partial outputs before retrying; no automatic recursive cleanup of existing dist data occurs.
 
 The DEB is still a metrics-only canary with disabled/stopped service on install, restricted user, protected YAML, private durable state and preserved config/spool on remove/reinstall/upgrade. See [DEB installation/security guide](DEB_CANARY.md) and the unchanged `packaging/deb/observe-agent.service`.
 
@@ -147,7 +147,28 @@ SHA256 detects corruption or a mismatch with the downloaded manifest; it is **no
 4. Validate real systemd package lifecycle, fixture-only complete bootstrap, and older-package-version upgrade semantics. Never use these destructive-to-runner tests on self-hosted/customer hosts.
 5. Upload validated package assets within that workflow run, separately from compile previews.
 
-`release.yml` responds to version tags only in `vinod-cs/observe-agent`, invokes all validation, and serializes publication per tag. The publish job downloads only its own validated run artifact, rechecks hashes, creates a **draft prerelease**, uploads the allowlisted assets, then exposes it as a prerelease with latest disabled. Existing releases/assets are not overwritten; a failed partial draft requires operator review before retry. This is intentionally not an automatic production-release path.
+`release.yml` responds to canary tags only (`v*-canary.*`) in `vinod-cs/observe-agent`, invokes all validation, and serializes publication per tag. The publish job checks out the same tagged SHA with persisted credentials disabled, downloads only its own validated run artifact, and invokes `scripts/publish-release.py`. This helper is Actions/tag guarded and uses only the workflow-provided GitHub token via `gh`. Build scripts remain offline/local and never invoke publication.
+
+The publisher validates exactly the versioned AMD64 DEB, identical `observe-agent_linux_amd64.deb` alias and `SHA256SUMS`; missing/extra/wrong names, unsafe files, duplicate/traversal manifest entries or hash mismatches fail before any release mutation. It creates a **draft prerelease** with `--verify-tag` (never creates a tag), uploads only that allowlist, reads back and verifies the bytes, then explicitly clears draft with prerelease/latest=false. Final success requires a non-draft prerelease at the expected repository/tag URL with all three verified assets. The Actions job summary links the actual Release and downloads. GitHub-generated source archives may additionally appear in the Release UI; the workflow uploads only the three requested files.
+
+Safe reruns: an identical published prerelease is verified and left untouched. A draft created by this publisher (identified by its notes marker) resumes only missing uploads after verifying all existing bytes. Changed bytes, unrelated/duplicate assets, unfinished upload state, a stable release or an unrecognized older/manual draft fail with explicit instructions; no deletion or `--clobber` is used. A rebuilt DEB can differ due to build timestamps: rerun the failed publication job against the original validated run artifact, rather than overwriting a release with rebuilt bytes. If originals are unavailable or differ, use a new approved tag. An older `.5` draft without the ownership marker requires operator review; this implementation does not silently adopt it.
+
+The locally available `v0.1.0-canary.20260903.5` workflow already included `gh release create/upload/edit`. Therefore local inspection alone does **not** prove why the reported hosted run had no visible Release. Check that run's actual publish-step outcome, draft state, repository visibility and Release URL; an environment deployment badge is not evidence of a Release. This fix adds missing postcondition checks and rerun handling, not a claim that the old workflow lacked a create command. Existing tag reruns use their original workflow revision; a new tag must contain the updated files.
+
+For `v0.1.0-canary.20260903.6`, expected URLs (not created during local validation):
+
+```text
+https://github.com/vinod-cs/observe-agent/releases/tag/v0.1.0-canary.20260903.6
+https://github.com/vinod-cs/observe-agent/releases/download/v0.1.0-canary.20260903.6/observe-agent_0.1.0-canary.20260903.6_amd64.deb
+https://github.com/vinod-cs/observe-agent/releases/download/v0.1.0-canary.20260903.6/observe-agent_linux_amd64.deb
+https://github.com/vinod-cs/observe-agent/releases/download/v0.1.0-canary.20260903.6/SHA256SUMS
+```
+
+Canaries remain **Pre-release**, never stable/Latest; `install.sh` must receive `--version <canary-tag>` when only canaries exist. Environment `canary-release` remains an approval/protection gate; it does not create a release by itself. No environment deployment to customer machines is performed by this workflow.
+
+Offline publication tests: `python3 -B tests/release/publication_test.py` (20 cases, fake GitHub CLI only). They exercise create/prerelease, exact asset integrity, interrupted/resumed draft, identical rerun, conflicts, permission/API errors, final draft detection, summary links and local invocation refusal. They never call GitHub or use a real token. CI runs them in the Linux native job before packaging/publication.
+
+Local publication-fix validation: all 20 tests passed on Windows Python 3.14 and Linux Python 3.11 (network-disabled container); cached actionlint 1.7.7 passed both workflows; Linux installer-contract regressions and `git diff --check` passed. No real gh publication/API request, tag creation, release, push or deployment was performed. Hosted execution with the repository's environment protections remains to be verified after an explicitly approved tag.
 
 Only publish has `contents: write`; validation has read-only access. Authentication uses `${{ github.token }}` supplied as `GH_TOKEN`, never a hardcoded token/PAT. The publish job uses the `canary-release` environment: **configure required reviewers before enabling tag pushes**; environment naming alone does not enforce approval. Protect main/version tags and restrict who may publish. [GitHub token permissions](https://docs.github.com/en/actions/tutorials/authenticate-with-github_token).
 

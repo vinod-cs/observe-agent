@@ -45,6 +45,11 @@ jobs:
       - if: runner.os == 'Linux'
         shell: bash
         run: bash tests/release/installers.sh
+      # AGENTV1 START: fake-CLI publication regressions; never contacts GitHub.
+      - if: runner.os == 'Linux'
+        shell: bash
+        run: python3 -B tests/release/publication_test.py
+      # AGENTV1 END: offline publication tests
   cross-build:
     runs-on: ubuntu-24.04
     strategy:
