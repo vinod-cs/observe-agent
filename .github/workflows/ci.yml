@@ -27,13 +27,23 @@ jobs:
           cache: false
       - run: go test ./...
       - run: go vet ./...
-      - shell: bash
-        run: test -z "$(gofmt -l cmd internal tests)"
+      # AGENTV1 START: one Linux-only formatting gate; native Windows needs no Bash.
+      - name: Check Go formatting (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          unformatted="$(gofmt -l cmd internal tests)"
+          if [[ -n "$unformatted" ]]; then
+            printf 'Go files require gofmt:\n%s\n' "$unformatted"
+            exit 1
+          fi
+      # AGENTV1 END: platform-specific formatting gate
       - run: go run ./cmd/observe-agent --check --config configs/agent.json
       - if: runner.os == 'Windows'
         shell: pwsh
         run: ./tests/release/windows.ps1
       - if: runner.os == 'Linux'
+        shell: bash
         run: bash tests/release/installers.sh
   cross-build:
     runs-on: ubuntu-24.04
