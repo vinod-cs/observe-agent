@@ -166,7 +166,70 @@ https://github.com/vinod-cs/observe-agent/releases/download/v0.1.0-canary.202609
 
 Canaries remain **Pre-release**, never stable/Latest; `install.sh` must receive `--version <canary-tag>` when only canaries exist. Environment `canary-release` remains an approval/protection gate; it does not create a release by itself. No environment deployment to customer machines is performed by this workflow.
 
-Offline publication tests: `python3 -B tests/release/publication_test.py` (20 cases, fake GitHub CLI only). They exercise create/prerelease, exact asset integrity, interrupted/resumed draft, identical rerun, conflicts, permission/API errors, final draft detection, summary links and local invocation refusal. They never call GitHub or use a real token. CI runs them in the Linux native job before packaging/publication.
+Offline publication tests: `python3 -B tests/release/publication_test.py` (32 cases, fake GitHub CLI only). They exercise create/prerelease, exact asset integrity, interrupted/resumed draft, identical rerun, conflicts, permission/API errors, final draft detection, summary links and local invocation refusal. CI runs them in the Linux native job before packaging/publication.
+
+### Hosted .6 failure: draft and prerelease classification
+
+The exact reported message came from this pre-upload predicate:
+
+```python
+release is not None and release.get("prerelease") is True
+```
+
+It ran **before** draft/ownership classification, conflating a missing lookup result
+with a non-prerelease draft or a published stable release. An owned draft with
+`draft=true, prerelease=false` could never reach the explicit publication edit.
+The old fake CLI always returned an immediately visible draft with prerelease=true,
+so it missed this case. A second weakness was exact `tag_name` filtering of REST
+release-list data rather than resolving a pending draft tag.
+
+Inspection of the local `.6` tag confirms create already passed `--draft` and
+`--prerelease`, and edit passed `--draft=false --prerelease --latest=false`. No other
+workflow command created a stable release first. The old REST `draft`/`prerelease`
+field names were correct for `gh api`; it did not use `gh release view` at all.
+There is no code evidence that edit lost the flag: the reported guard executes
+before edit. A read-only unauthenticated lookup of `.6` returned HTTP 404; that
+cannot reveal private/draft state. Without authenticated hosted response/log data,
+we cannot claim whether that run saw None or prerelease=false. The code defect and
+the two possible error branches are proven; the exact remote state is not.
+
+Current state machine:
+
+1. Resolve the exact pending/published tag through GraphQL `release(tagName: ...)`.
+   Repository/query errors fail closed; only an explicit null means absent.
+2. Read `gh release view <tag> --repo vinod-cs/observe-agent --json
+   databaseId,apiUrl,isDraft,isPrerelease,tagName,body,assets,url`. Verify the numeric
+   ID against the pending-tag result and API URL against the expected repository.
+   Strictly map CLI camelCase boolean fields once; missing/string flags fail.
+3. Absent → create draft with explicit --prerelease. A bounded post-create lookup
+   retries absence twice (1s, 2s), never creates again on that attempt. Missing,
+   malformed and stable states now have distinct diagnostics.
+4. Owned draft → permit either prerelease boolean, verify existing bytes, upload
+   missing expected assets, recheck ownership/ID/draft state, then publish with
+   `--draft=false --prerelease --latest=false` in one edit. This is not conversion
+   of a published stable release.
+5. Published stable → fail without upload/edit, even when its notes contain our
+   ownership marker. Unowned draft → fail. Identical published prerelease → no-op.
+6. Final result must have the same numeric ID, exact triggering tagName,
+   isDraft=false, isPrerelease=true, expected Release URL, exactly three assets,
+   and identical remote checksums/bytes. Wrong final flags fail rather than trying
+   to repair an unexpectedly published stable release.
+
+Drafts can have temporary `untagged-*` REST/UI names: binding uses the requested
+pending tag's numeric ID, never a fuzzy name. Final published tag must match exactly.
+GitHub CLI itself uses pending-tag resolution for drafts; see its
+[release fetch implementation](https://github.com/cli/cli/blob/trunk/pkg/cmd/release/shared/fetch.go)
+and [documented JSON fields](https://cli.github.com/manual/gh_release_view).
+
+The publisher logs only phase, requested tag, numeric release ID and boolean state;
+the workflow also prints gh version. It does not print tokens or release bodies.
+New tests reproduce the old guard failure, pending-tag lookup, false-prerelease
+owned draft/resume, accidental published-stable creation, final edit losing its flag,
+state changing to stable during upload, missing-result retries, wrong tag/repo/ID,
+and malformed CLI flag types. All 32 tests pass on Windows and offline Linux;
+actionlint, Linux installer regressions and git diff --check pass. No authenticated
+GitHub mutation or hosted publication was performed. A new approved tag such as
+`.7` must contain the fix; no tag was created locally.
 
 Local publication-fix validation: all 20 tests passed on Windows Python 3.14 and Linux Python 3.11 (network-disabled container); cached actionlint 1.7.7 passed both workflows; Linux installer-contract regressions and `git diff --check` passed. No real gh publication/API request, tag creation, release, push or deployment was performed. Hosted execution with the repository's environment protections remains to be verified after an explicitly approved tag.
 

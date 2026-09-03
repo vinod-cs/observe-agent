@@ -43,5 +43,7 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         shell: bash
         run: |
+          # AGENTV1: record CLI version; publisher logs only non-secret release-state fields.
+          gh --version
           python3 -B scripts/publish-release.py
 # AGENTV1 FILE END

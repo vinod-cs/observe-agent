@@ -8,6 +8,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 
 REPOSITORY = "vinod-cs/observe-agent"
 TAG = re.compile(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-canary\.[0-9A-Za-z.]+")
@@ -55,11 +56,54 @@ def gh(*args):
 
 
 def find_release(tag, cli):
-    # A successful paginated list distinguishes absence from authentication/API failure.
-    pages = json.loads(cli("api", f"repos/{REPOSITORY}/releases?per_page=100", "--paginate", "--slurp"))
-    matches = [r for page in pages for r in page if r["tag_name"] == tag]
-    require(len(matches) <= 1, "Ambiguous release identity")
-    return matches[0] if matches else None
+    # AGENTV1 START: resolve pending draft tags, not just REST list tag_name values.
+    # GraphQL null distinguishes absence from an auth/API error, without parsing stderr.
+    owner, name = REPOSITORY.split("/")
+    query = "query($owner:String!,$name:String!,$tag:String!){repository(owner:$owner,name:$name){release(tagName:$tag){databaseId}}}"
+    lookup = json.loads(cli("api", "graphql", "-f", "query=" + query, "-f", "owner=" + owner,
+                            "-f", "name=" + name, "-f", "tag=" + tag))
+    require(not lookup.get("errors"), "Release lookup failed; no create fallback attempted")
+    repository = lookup.get("data", {}).get("repository")
+    require(isinstance(repository, dict) and "release" in repository, "Release repository unavailable; no create fallback attempted")
+    found = repository["release"]
+    if found is None:
+        return None
+    require(isinstance(found, dict) and type(found.get("databaseId")) is int and found["databaseId"] > 0,
+            "Release lookup returned invalid identity")
+    fields = "databaseId,apiUrl,isDraft,isPrerelease,tagName,body,assets,url"
+    view = json.loads(cli("release", "view", tag, "--repo", REPOSITORY, "--json", fields))
+    require(type(view.get("databaseId")) is int and view["databaseId"] == found["databaseId"]
+            and view.get("apiUrl") == f"https://api.github.com/repos/{REPOSITORY}/releases/{found['databaseId']}",
+            "Release lookup repository/identity mismatch")
+    require(type(view.get("isDraft")) is bool and type(view.get("isPrerelease")) is bool,
+            "Release JSON schema invalid: isDraft/isPrerelease must be booleans")
+    require(isinstance(view.get("tagName"), str) and isinstance(view.get("assets"), list), "Release JSON schema invalid")
+    # REST fields are not CLI JSON fields. Normalize once and never default missing flags.
+    # A draft can expose an untagged REST/UI alias; GraphQL bound its pending tag to this ID.
+    require(view["isDraft"] or view["tagName"] == tag, "Published release tag does not match triggering tag")
+    return {"id": found["databaseId"], "tag_name": view["tagName"], "draft": view["isDraft"],
+            "prerelease": view["isPrerelease"], "body": view.get("body"), "assets": view["assets"], "html_url": view.get("url")}
+    # AGENTV1 END: draft-aware explicit JSON normalization
+
+
+def required_release(tag, cli, phase):
+    # Only retry confirmed absence after a mutation; never retry/create over stable state.
+    for attempt in range(3):
+        release = find_release(tag, cli)
+        if release is not None:
+            print("Release state: " + json.dumps({"phase": phase, "tag": tag, "release_id": release["id"],
+                  "isDraft": release["draft"], "isPrerelease": release["prerelease"]}))
+            return release
+        if attempt < 2:
+            time.sleep(attempt + 1)
+    raise RuntimeError(f"Release missing during {phase} after bounded lookup retries; no additional create attempted")
+
+
+def require_publishable(release):
+    if release["draft"]:
+        require(MARKER in (release.get("body") or ""), "Existing draft is not owned by this publisher; explicit operator review required")
+    else:
+        require(release["prerelease"] is True, "Published stable release exists; refusing any mutation (even if owned)")
 
 
 def verify_remote(release, tag, names, hashes, cli):
@@ -85,21 +129,26 @@ def publish(tag, directory, cli=gh):
         cli("release", "create", tag, "--repo", REPOSITORY, "--verify-tag", "--draft", "--prerelease", "--latest=false",
             "--title", f"Observe Agent {tag[1:]} (canary)", "--notes",
             MARKER + "\nTest-only Linux AMD64 DEB. Installation does not start the service. Configure and validate before starting. No production-readiness claim.")
-        release = find_release(tag, cli)
-    require(release is not None and release.get("prerelease") is True, "Expected canary prerelease missing (stable releases are never converted)")
-    if release["draft"]:
-        require(MARKER in (release.get("body") or ""), "Existing draft is not owned by this publisher; explicit operator review required")
+        release = required_release(tag, cli, "after-create")
+    # An owned draft with prerelease=false is not a published stable release.
+    # Its final edit explicitly sets prerelease=true; published stable is always blocked.
+    require_publishable(release)
+    release_id = release["id"]
     missing = verify_remote(release, tag, names, hashes, cli)
     if not release["draft"]:
         require(not missing, "Published release is incomplete; refusing to mutate published assets")
     else:
         for name in missing:
             cli("release", "upload", tag, str(Path(directory) / name), "--repo", REPOSITORY)
-        release = find_release(tag, cli)
-        require(release is not None and not verify_remote(release, tag, names, hashes, cli), "Draft is incomplete; not publishing")
+        release = required_release(tag, cli, "before-publish")
+        require_publishable(release)
+        require(release["id"] == release_id and release["draft"], "Release identity/state changed during upload; refusing publish")
+        require(not verify_remote(release, tag, names, hashes, cli), "Draft is incomplete; not publishing")
         cli("release", "edit", tag, "--repo", REPOSITORY, "--draft=false", "--prerelease", "--latest=false")
-    final = find_release(tag, cli)
-    require(final is not None and final.get("draft") is False and final.get("prerelease") is True,
+    final = required_release(tag, cli, "after-publish")
+    require(final["id"] == release_id and final["tag_name"] == tag,
+            "Publication not confirmed: release identity/tag changed")
+    require(final["draft"] is False and final["prerelease"] is True,
             "Publication not confirmed: release must be non-draft and prerelease")
     require(not verify_remote(final, tag, names, hashes, cli), "Published release assets missing")
     url = f"https://github.com/{REPOSITORY}/releases/tag/{tag}"
