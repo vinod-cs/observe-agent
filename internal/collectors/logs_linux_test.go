@@ -171,7 +171,9 @@ func TestLogsRuntimeResourceBound(t *testing.T) {
 	time.Sleep(400 * time.Millisecond)
 	activeGoroutines := runtime.NumGoroutine()
 	activeFDs, _ := os.ReadDir("/proc/self/fd")
-	if delta := activeGoroutines - baselineGoroutines; delta < 2 || delta > 6 {
+	// The delivery worker may already have completed an accepted one-record
+	// batch; the tailer remains active, so one bounded worker is sufficient.
+	if delta := activeGoroutines - baselineGoroutines; delta < 1 || delta > 6 {
 		t.Fatalf("unexpected Logs goroutine delta %d", delta)
 	}
 	if delta := len(activeFDs) - len(baselineFDs); delta < 2 || delta > 8 {
