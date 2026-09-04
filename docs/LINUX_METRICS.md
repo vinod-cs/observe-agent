@@ -1,7 +1,7 @@
 <!-- AGENTV1 FILE START: implemented Linux metrics slice and explicit operational limits -->
-# Linux metrics-only vertical slice
+# Linux metrics vertical slice
 
-This supersedes the foundation-only runtime statements in the earlier documents. The executable now has an explicit `--run` mode. It is **not yet an approved replacement for the deployed Linux Agent**: logs/traces, legacy YAML import, installer/upgrade compatibility and live EC2-to-backend persistence remain release gates.
+This supersedes the foundation-only runtime statements in the earlier documents. The executable now has an explicit `--run` mode. Linux file Logs were added later as a separate opt-in capability with an independent queue; see [Linux file Logs](LINUX_FILE_LOGS.md). It is **not yet an approved replacement for the deployed Linux Agent**: traces, legacy YAML import and live EC2-to-backend compatibility remain release gates.
 
 ## Implemented path
 
@@ -17,7 +17,7 @@ flowchart LR
   S --> F[Redacted delivery and collection counters]
 ```
 
-Logs and traces have no registrations and no receiver implementation in this slice. Disabled metrics do not construct a reader, inspect identity, read the credential or contact an endpoint. `--check` only reads configuration. A request to enable unimplemented logs/traces fails preflight before metrics starts.
+The Metrics capability remains independent from Logs. Disabled metrics do not construct a reader, inspect identity, read the credential or contact an endpoint. `--check` only reads configuration. Traces remain unsupported and fail preflight when enabled.
 
 Pinned reuse:
 

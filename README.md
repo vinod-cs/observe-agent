@@ -9,13 +9,13 @@
 
 > **Previous reliability phase:** Linux metrics use a bounded, persistent acknowledgement queue. See [delivery reliability](docs/DELIVERY_RELIABILITY.md), [reliability verification](docs/RELIABILITY_VALIDATION.md), and [prepared live EC2 validation](docs/LIVE_EC2_VALIDATION.md). The foundation-only and memory-only descriptions below are historical. No live deployment has been performed.
 
-> **Current phase:** Linux metrics-only collection is implemented. See [Linux metrics runtime](docs/LINUX_METRICS.md), [configuration compatibility](docs/CONFIG_COMPATIBILITY.md), and [current validation](docs/METRICS_VALIDATION.md). The foundation description below is retained as historical context; its statements that no collector/sender exists are superseded. This is still not an approved deployed-Agent replacement.
+> **Current phase:** Linux metrics and opt-in, allowlisted file Logs collection are implemented. See [Linux file Logs](docs/LINUX_FILE_LOGS.md), [Linux metrics runtime](docs/LINUX_METRICS.md), and [configuration compatibility](docs/CONFIG_COMPATIBILITY.md). Logs are disabled by default and traces remain unsupported. The foundation description below is retained as historical context. This is still not an approved deployed-Agent replacement.
 
-This is a **foundation, not a deployable replacement for agent-i**. Existing Agent and Observe repositories are read-only references and were not modified. No telemetry is collected or sent by this executable. Do not replace an installed Linux Agent with this build.
+This remains a **canary, not an approved production replacement for agent-i**. The executable now collects Linux host metrics and explicitly allowlisted Linux file Logs and sends them through independent durable queues to Observe OTLP endpoints. Existing Agent and Observe repositories remain read-only references and were not modified. Do not replace an installed Linux Agent without completing live compatibility and rollout gates.
 
-Implemented: portable identity and capability policy, serialized lifecycle transitions, rollback contracts, HTTPS/API-key request construction, bounded strict configuration parsing, authenticated remote-policy gate interfaces, Linux identity/file/state primitives, Windows/Darwin compile-safe placeholders, tests and CI definition.
+Implemented: portable identity and capability policy, serialized lifecycle transitions, Linux host metrics, opt-in secure Linux file Logs, standard OTel pdata serialization, HTTPS/API-key export, independent bounded durable queues, strict configuration parsing, Linux identity/file/state primitives, Windows/Darwin compile-safe placeholders, DEB packaging, tests and CI/release workflows.
 
-Not implemented: real collectors, OTLP serialization/transport loop, IMDS detector, durable telemetry queue, memory limiter, remote-policy transport/verifier/startup recovery, Windows machine identity/collectors/SCM, service installers, packages or updater. Unsupported collectors fail explicitly; they never report fabricated zeroes.
+Not implemented: traces, Windows/macOS collectors and service integration, Kubernetes, remote configuration, automatic upgrades, or a completed production rollout. Unsupported capabilities fail explicitly; they never report fabricated zeroes.
 
 ## Check the foundation
 

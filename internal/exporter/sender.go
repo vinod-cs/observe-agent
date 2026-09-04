@@ -36,6 +36,7 @@ type Sender struct {
 	secrets security.SecretProvider
 	stats   *selftelemetry.Counters
 	sleep   func(context.Context, time.Duration) bool
+	signal  policy.Capability
 }
 
 func NewSender(cfg config.Config, secrets security.SecretProvider, stats *selftelemetry.Counters, client *http.Client) *Sender {
@@ -46,7 +47,12 @@ func NewSender(cfg config.Config, secrets security.SecretProvider, stats *selfte
 	_, _, d := cfg.Runtime()
 	copy.Timeout = time.Duration(d.RequestTimeoutSeconds) * time.Second
 	copy.CheckRedirect = Client().CheckRedirect
-	return &Sender{cfg, &copy, secrets, stats, wait}
+	return &Sender{cfg: cfg, client: &copy, secrets: secrets, stats: stats, sleep: wait, signal: policy.Metrics}
+}
+func NewSignalSender(cfg config.Config, signal policy.Capability, secrets security.SecretProvider, stats *selftelemetry.Counters, client *http.Client) *Sender {
+	s := NewSender(cfg, secrets, stats, client)
+	s.signal = signal
+	return s
 }
 func wait(ctx context.Context, d time.Duration) bool {
 	t := time.NewTimer(d)
@@ -73,6 +79,18 @@ func retryDelay(header string, attempt int, now time.Time) time.Duration {
 	}
 	return min(time.Duration(1<<attempt)*time.Second, 30*time.Second) + time.Duration(rand.IntN(500))*time.Millisecond
 }
+
+// retryDelayForSignal preserves the existing Metrics Retry-After behavior.
+// Logs uses a bounded delay because its independent durable spool must remain
+// responsive to shutdown/configuration changes even when a peer sends an
+// unreasonable Retry-After value.
+func retryDelayForSignal(signal policy.Capability, header string, attempt int, now time.Time) time.Duration {
+	delay := retryDelay(header, attempt, now)
+	if signal == policy.Logs {
+		return min(delay, 30*time.Minute)
+	}
+	return delay
+}
 func (s *Sender) Send(ctx context.Context, payload []byte) Outcome {
 	_, _, options := s.cfg.Runtime()
 	for attempt := 0; attempt < options.MaxAttempts; attempt++ {
@@ -84,7 +102,7 @@ func (s *Sender) Send(ctx context.Context, payload []byte) Outcome {
 		if ctx.Err() != nil {
 			return Cancelled
 		}
-		req, err := Request(ctx, s.cfg, policy.Metrics, bytes.NewReader(payload), s.secrets)
+		req, err := Request(ctx, s.cfg, s.signal, bytes.NewReader(payload), s.secrets)
 		if err != nil {
 			s.stats.AuthFailures.Add(1)
 			s.stats.ExportFailures.Add(1)
@@ -109,7 +127,7 @@ func (s *Sender) Send(ctx context.Context, payload []byte) Outcome {
 				return Exhausted
 			}
 			s.stats.Retries.Add(1)
-			if !s.sleep(ctx, retryDelay("", attempt, time.Now())) {
+			if !s.sleep(ctx, retryDelayForSignal(s.signal, "", attempt, time.Now())) {
 				return Cancelled
 			}
 			continue
@@ -142,22 +160,31 @@ func (s *Sender) Send(ctx context.Context, payload []byte) Outcome {
 				}
 				if part, ok := body["partialSuccess"]; ok {
 					var partial struct {
-						Rejected json.Number `json:"rejectedDataPoints"`
+						RejectedDataPoints json.Number `json:"rejectedDataPoints"`
+						RejectedLogRecords json.Number `json:"rejectedLogRecords"`
 					}
 					if json.Unmarshal(part, &partial) != nil {
 						s.stats.ExportFailures.Add(1)
 						return Rejected
 					}
-					if partial.Rejected != "" {
-						n, e := strconv.ParseUint(string(partial.Rejected), 10, 64)
+					rejected := partial.RejectedDataPoints
+					if s.signal == policy.Logs {
+						rejected = partial.RejectedLogRecords
+					}
+					if rejected != "" {
+						n, e := strconv.ParseUint(string(rejected), 10, 64)
 						if e != nil {
 							s.stats.ExportFailures.Add(1)
 							return Rejected
 						}
 						if n > 0 {
 							s.stats.PointsRejected.Add(n)
-							s.stats.ExportFailures.Add(1)
-							return Rejected
+							if s.signal != policy.Logs {
+								s.stats.ExportFailures.Add(1)
+								return Rejected
+							}
+							// OTLP Logs partial success has no per-record identity. The
+							// accepted portion is final and the whole durable batch is Acked.
 						}
 					}
 				}
@@ -176,14 +203,14 @@ func (s *Sender) Send(ctx context.Context, payload []byte) Outcome {
 		// AGENTV1 START: honor Retry-After even at the last per-cycle attempt,
 		// preventing the persistent worker from retrying earlier on its next cycle.
 		if attempt+1 == options.MaxAttempts {
-			if !s.sleep(ctx, retryDelay(strings.TrimSpace(response.Header.Get("Retry-After")), attempt, time.Now())) {
+			if !s.sleep(ctx, retryDelayForSignal(s.signal, strings.TrimSpace(response.Header.Get("Retry-After")), attempt, time.Now())) {
 				return Cancelled
 			}
 			return Exhausted
 		}
 		// AGENTV1 END: persistent Retry-After boundary
 		s.stats.Retries.Add(1)
-		if !s.sleep(ctx, retryDelay(strings.TrimSpace(response.Header.Get("Retry-After")), attempt, time.Now())) {
+		if !s.sleep(ctx, retryDelayForSignal(s.signal, strings.TrimSpace(response.Header.Get("Retry-After")), attempt, time.Now())) {
 			return Cancelled
 		}
 	}

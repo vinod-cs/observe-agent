@@ -12,6 +12,11 @@ chmod 0640 /etc/observe-agent/agent.yaml
 sed -i 's/8443/8444/;s/upgrade-test-not-real/package-test-key-not-real/' /etc/observe-agent/agent.yaml
 if [[ ${OBSERVE_UPGRADE_V1:-no} != yes ]]; then
   sed -i '/^observe:/a\  backend_id: fixture-backend\n  organization_id: fixture-org' /etc/observe-agent/agent.yaml
+  install -d -o root -g observe-agent -m 0750 /var/log/observe-agent-upgrade-test
+  printf 'pending-log-before-upgrade\n' > /var/log/observe-agent-upgrade-test/application.log
+  chown root:observe-agent /var/log/observe-agent-upgrade-test/application.log
+  chmod 0640 /var/log/observe-agent-upgrade-test/application.log
+  sed -i '/^  logs:/,/^  traces:/c\  logs:\n    enabled: true\n    state_directory: /var/lib/observe-agent/logs\n    queue_bytes: 1048576\n    queue_items: 16\n    poll_interval: 200ms\n    max_files: 8\n    files:\n      - id: upgrade-test\n        root: /var/log/observe-agent-upgrade-test\n        include: ["*.log"]\n        start_at: beginning\n        max_open_files: 4\n        max_line_bytes: 4096\n        multiline:\n          enabled: false\n          flush_timeout: 1s\n          max_lines: 20\n          max_bytes: 4096\n  traces:' /etc/observe-agent/agent.yaml
 fi
 # AGENTV1 END: legacy/current fixture selection
 before=$(sha256sum /etc/observe-agent/agent.yaml)
@@ -23,11 +28,16 @@ systemctl is-active --quiet observe-agent
 systemctl stop observe-agent
 find /var/lib/observe-agent/metrics -name '*.rec' -exec sha256sum '{}' \; > /tmp/observe-upgrade-records
 [[ -s /tmp/observe-upgrade-records ]]
+if [[ ${OBSERVE_UPGRADE_V1:-no} != yes ]]; then
+  find /var/lib/observe-agent/logs -type f \( -name '*.lrec' -o -name '*.json' \) -exec sha256sum '{}' \; > /tmp/observe-upgrade-log-records
+  [[ -s /tmp/observe-upgrade-log-records ]]
+fi
 systemctl start observe-agent
 dpkg --force-confdef --force-confold -i "$new"
 [[ $(systemctl is-active observe-agent) == inactive ]]
 [[ $(sha256sum /etc/observe-agent/agent.yaml) == "$before" && $(id -u observe-agent) == "$uid" ]]
 sha256sum --check /tmp/observe-upgrade-records
+if [[ ${OBSERVE_UPGRADE_V1:-no} != yes ]]; then sha256sum --check /tmp/observe-upgrade-log-records; fi
 [[ $(stat -c '%a %U:%G' /etc/observe-agent/agent.yaml) == '640 root:observe-agent' ]]
 # AGENTV1 START: one-time v1 binding then actual TLS replay after transport change.
 if [[ ${OBSERVE_UPGRADE_V1:-no} == yes ]]; then
@@ -56,6 +66,7 @@ sleep 12
 systemctl is-active --quiet observe-agent
 systemctl stop observe-agent
 node -e 'const s=require("/tmp/fixture-summary.json");if(s.accepted<1||s.points<1||s.secretInPayload)process.exit(1)'
+if [[ ${OBSERVE_UPGRADE_V1:-no} != yes ]]; then node -e 'const s=require("/tmp/fixture-summary.json");if(s.logsAccepted<1||s.logRecords<1)process.exit(1)'; fi
 while read -r checksum record; do [[ ! -f $record ]]; done < /tmp/observe-upgrade-records
 echo 'PASS migrated/upgraded pending queue replayed to changed HTTPS endpoint; no previous_endpoint needed on restart'
 # AGENTV1 END: TLS replay

@@ -1,7 +1,7 @@
 <!-- AGENTV1 FILE START: implemented foundation and proposed extension boundaries -->
 # Architecture
 
-> Foundation architecture snapshot. [Linux metrics-only implementation](LINUX_METRICS.md) now supplies the reader, pdata serializer and sender, and [persistent delivery](DELIVERY_RELIABILITY.md) supplies the bounded disk queue. Other proposed collectors and remote transport remain unimplemented.
+> Foundation architecture snapshot. [Linux metrics](LINUX_METRICS.md) supply host readers and the Metrics pdata pipeline, [Linux file Logs](LINUX_FILE_LOGS.md) supply the opt-in secure tailer and Logs pdata pipeline, and [persistent delivery](DELIVERY_RELIABILITY.md) describes the Metrics queue. Metrics and Logs use separate bounded durable queues. Traces and other proposed collectors remain unimplemented.
 
 ## Status vocabulary
 

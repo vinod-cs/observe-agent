@@ -4,6 +4,7 @@ package exporter
 import (
 	"context"
 	"github.com/agent-i/agent/internal/config"
+	"github.com/agent-i/agent/internal/policy"
 	"github.com/agent-i/agent/internal/security"
 	"github.com/agent-i/agent/internal/selftelemetry"
 	"io"
@@ -117,8 +118,11 @@ func TestRetryAfterAndBackoff(t *testing.T) {
 		t.Fatal("duration overflow")
 	}
 	future := now.Add(time.Hour).UTC().Truncate(time.Second)
-	if delay := retryDelay(future.Format(http.TimeFormat), 0, now); delay < 59*time.Minute {
+	if delay := retryDelay(future.Format(http.TimeFormat), 0, now); delay < 59*time.Minute || delay > time.Hour {
 		t.Fatal("date Retry-After ignored")
+	}
+	if delay := retryDelayForSignal(policy.Logs, future.Format(http.TimeFormat), 0, now); delay != 30*time.Minute {
+		t.Fatal("Logs Retry-After was not bounded")
 	}
 	if delay := retryDelay("invalid", 0, now); delay < time.Second || delay > 1500*time.Millisecond {
 		t.Fatal("jitter bounds")

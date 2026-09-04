@@ -1,5 +1,5 @@
 <!-- AGENTV1 FILE START: installed test-package guidance -->
-# Observe Agent metrics-only canary
+# Observe Agent metrics and Linux file Logs canary
 
 This is a TEST package, not a production replacement for agent-i. It does not touch
 `/usr/local/bin/agent-i`, `/etc/agent-i`, or `agent-i.service`. No download service
@@ -38,15 +38,20 @@ Values may be a raw key or `ApiKey <key>`. Do not put real keys on command lines
 `sudo --check` does not automatically load systemd's env file: use the same protected
 environment or rely on ExecStartPre under systemd; secret-file mode works directly.
 
-Only metrics are implemented. Enabling logs/traces is rejected. YAML keys are
-strict; duplicate/unknown keys, aliases, merges and multiple documents are rejected.
+Linux file Logs are opt-in and disabled by default; traces remain unsupported.
+Each Logs source requires an explicit absolute authorization root plus direct-child
+include/exclude patterns. The service account needs read/traverse ACLs only for those
+roots/files. Symlink/path escapes are rejected. YAML keys are strict;
+duplicate/unknown keys, aliases, merges and multiple documents are rejected.
 This is a new YAML schema, not an importer for old agent-i YAML. Existing JSON remains
 supported. YAML `--check` validates references offline; it cannot prove a key is
 accepted by the remote server. The endpoint must be a verified HTTPS /api/v1/otlp base.
 
-The restricted non-login system user owns `/var/lib/observe-agent` and its metrics
-spool (0700 directories, 0600 records). The durable FIFO queue defaults to 64 MiB /
-64 batches, reject-new overflow, at-least-once replay; it is not exactly-once.
+The restricted non-login system user owns `/var/lib/observe-agent`, the unchanged
+Metrics spool, and independent `/var/lib/observe-agent/logs/{queue,checkpoints}`
+state (0700 directories, 0600 records). Logs defaults to a separate 64 MiB / 1024
+record reject-new FIFO. A file checkpoint advances only after queue admission is
+durable. Delivery is at-least-once, not exactly-once.
 
 `dpkg --remove observe-agent` stops the service, retains YAML, state and account.
 Reinstall preserves edited conffiles (choose keep-local on dpkg's upgrade prompt).

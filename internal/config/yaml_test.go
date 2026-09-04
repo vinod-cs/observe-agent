@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -48,14 +49,14 @@ func TestYAMLAndRedaction(t *testing.T) {
 }
 func TestYAMLStrictFailures(t *testing.T) {
 	for name, s := range map[string]string{
-		"duplicate":    strings.Replace(yamlValid, "  api_key:", "  api_key: other\n  api_key:", 1),
-		"unknown":      yamlValid + "unknown: fixture-key-not-real\n",
-		"alias":        strings.Replace(yamlValid, "fixture-key-not-real", "&secret fixture-key-not-real", 1),
-		"multiple":     yamlValid + "---\nobserve: {}\n",
-		"wrong bool":   strings.Replace(yamlValid, "enabled: true", "enabled: yes", 1),
-		"logs enabled": strings.Replace(yamlValid, "logs:\n    enabled: false", "logs:\n    enabled: true", 1),
-		"merge":        yamlValid + "<<: {malicious: fixture-key-not-real}\n",
-		"bad tag":      strings.Replace(yamlValid, "fixture-key-not-real", "!secret fixture-key-not-real", 1),
+		"duplicate":      strings.Replace(yamlValid, "  api_key:", "  api_key: other\n  api_key:", 1),
+		"unknown":        yamlValid + "unknown: fixture-key-not-real\n",
+		"alias":          strings.Replace(yamlValid, "fixture-key-not-real", "&secret fixture-key-not-real", 1),
+		"multiple":       yamlValid + "---\nobserve: {}\n",
+		"wrong bool":     strings.Replace(yamlValid, "enabled: true", "enabled: yes", 1),
+		"traces enabled": strings.Replace(yamlValid, "traces:\n    enabled: false", "traces:\n    enabled: true", 1),
+		"merge":          yamlValid + "<<: {malicious: fixture-key-not-real}\n",
+		"bad tag":        strings.Replace(yamlValid, "fixture-key-not-real", "!secret fixture-key-not-real", 1),
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, e := Parse(strings.NewReader(s))
@@ -66,6 +67,49 @@ func TestYAMLStrictFailures(t *testing.T) {
 				t.Fatal("error exposed secret")
 			}
 		})
+	}
+}
+
+func TestLinuxLogsYAMLSchema(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux Logs configuration")
+	}
+	raw := strings.Replace(yamlValid, "logs:\n    enabled: false", `logs:
+    enabled: true
+    state_directory: /var/lib/observe-agent/logs
+    queue_bytes: 1048576
+    queue_items: 32
+    poll_interval: 1s
+    max_files: 16
+    files:
+      - id: application
+        root: /var/log/application
+        include: ["*.log"]
+        exclude: ["*.gz"]
+        start_at: beginning
+        service_name: checkout
+        environment: production
+        max_open_files: 8
+        max_line_bytes: 4096
+        multiline:
+          enabled: true
+          start_pattern: '^START'
+          flush_timeout: 2s
+          max_lines: 20
+          max_bytes: 4096`, 1)
+	c, err := Parse(strings.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := c.LogsRuntime()
+	if !c.Policy.Enabled["logs"] || len(l.Sources) != 1 || l.Sources[0].Root != "/var/log/application" || l.Sources[0].Multiline.FlushTimeoutMillis != 2000 {
+		t.Fatal("logs mapping")
+	}
+	for _, invalid := range []string{"../*.log", "/etc/passwd", "sub/*.log", "bad\x00.log"} {
+		candidate := strings.Replace(raw, `include: ["*.log"]`, `include: ["`+invalid+`"]`, 1)
+		if _, err = Parse(strings.NewReader(candidate)); err == nil {
+			t.Fatalf("unsafe pattern accepted: %q", invalid)
+		}
 	}
 }
 func TestYAMLReferencePrecedence(t *testing.T) {

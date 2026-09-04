@@ -4,6 +4,7 @@ package exporter
 import (
 	"context"
 	"github.com/agent-i/agent/internal/config"
+	"github.com/agent-i/agent/internal/policy"
 	"github.com/agent-i/agent/internal/security"
 	"github.com/agent-i/agent/internal/selftelemetry"
 	"net/http"
@@ -29,6 +30,25 @@ func TestLastAttemptHonorsRetryAfter(t *testing.T) {
 	sender.sleep = func(_ context.Context, d time.Duration) bool { delay = d; return true }
 	if got := sender.Send(context.Background(), []byte(`{}`)); got != Exhausted || delay != 30*time.Minute {
 		t.Fatalf("%s %s", got, delay)
+	}
+}
+
+func TestLogsPartialSuccessIsFinal(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/otlp/v1/logs" {
+			t.Error("wrong signal path")
+		}
+		w.WriteHeader(201)
+		_, _ = w.Write([]byte(`{"partialSuccess":{"rejectedLogRecords":"1"}}`))
+	}))
+	defer server.Close()
+	t.Setenv("TEST_INGEST", "ApiKey fixture-only")
+	cfg := testConfig(t, server.URL)
+	cfg.Policy.Enabled[policy.Logs] = true
+	stats := &selftelemetry.Counters{}
+	sender := NewSignalSender(cfg, policy.Logs, security.Environment{}, stats, server.Client())
+	if got := sender.Send(context.Background(), []byte(`{"resourceLogs":[]}`)); got != Accepted || stats.PointsRejected.Load() != 1 {
+		t.Fatalf("partial logs outcome=%s rejected=%d", got, stats.PointsRejected.Load())
 	}
 }
 

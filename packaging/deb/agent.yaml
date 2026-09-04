@@ -1,4 +1,4 @@
-# AGENTV1 FILE START: protected metrics-only canary package configuration.
+# AGENTV1 FILE START: protected metrics plus opt-in Linux file Logs configuration.
 # Configure endpoint and one authentication mode, then run --check and start.
 observe:
   # Non-secret logical deployment IDs. Keep stable across URLs and API-key rotation.
@@ -18,6 +18,31 @@ collection:
     enabled: true
   logs:
     enabled: false
+    # Logs state and quota are independent of the existing Metrics spool.
+    state_directory: /var/lib/observe-agent/logs
+    queue_bytes: 67108864
+    queue_items: 1024
+    overflow_policy: reject_new
+    poll_interval: 1s
+    max_files: 256
+    files: []
+    # Example (direct children of an explicit authorization root only):
+    # files:
+    #   - id: application
+    #     root: /var/log/my-application
+    #     include: ["*.log"]
+    #     exclude: ["*.gz"]
+    #     start_at: end
+    #     service_name: my-application
+    #     environment: production
+    #     max_open_files: 32
+    #     max_line_bytes: 262144
+    #     multiline:
+    #       enabled: false
+    #       start_pattern: ""
+    #       flush_timeout: 5s
+    #       max_lines: 200
+    #       max_bytes: 262144
   traces:
     enabled: false
 

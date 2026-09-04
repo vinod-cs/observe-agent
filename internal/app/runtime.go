@@ -18,7 +18,15 @@ func Run(ctx context.Context, cfg config.Config, diagnostics io.Writer) error {
 		return err
 	}
 	stats := &selftelemetry.Counters{}
-	registry := collectors.Registry{policy.Metrics: {Descriptor: policy.Descriptor{Capability: policy.Metrics, Implemented: true, Access: policy.Catalogue()[0].Access}, New: func() (collectors.Collector, error) { return collectors.NewMetrics(cfg, stats), nil }}}
+	logStats, logDelivery := &selftelemetry.LogCounters{}, &selftelemetry.Counters{}
+	var logsCollector *collectors.Logs
+	registry := collectors.Registry{
+		policy.Metrics: {Descriptor: policy.Descriptor{Capability: policy.Metrics, Implemented: true, Access: policy.Catalogue()[0].Access}, New: func() (collectors.Collector, error) { return collectors.NewMetrics(cfg, stats), nil }},
+		policy.Logs: {Descriptor: policy.Descriptor{Capability: policy.Logs, Implemented: true, Access: policy.Catalogue()[1].Access}, New: func() (collectors.Collector, error) {
+			logsCollector = collectors.NewLogs(cfg, logStats, logDelivery)
+			return logsCollector, nil
+		}},
+	}
 	return (platform.Native{}).Run(ctx, func(ctx context.Context) error {
 		manager := New(ctx, registry, nil, nil, time.Duration(cfg.Limits.ShutdownSeconds)*time.Second)
 		if err := manager.Apply(ctx, cfg.Policy); err != nil {
@@ -26,7 +34,15 @@ func Run(ctx context.Context, cfg config.Config, diagnostics io.Writer) error {
 		}
 		timer := time.NewTicker(time.Minute)
 		defer timer.Stop()
-		report := func() { _ = json.NewEncoder(diagnostics).Encode(stats.Snapshot()) }
+		report := func() {
+			values := stats.Snapshot()
+			if logsCollector != nil {
+				for k, v := range logsCollector.Snapshot() {
+					values["logs_"+k] = v
+				}
+			}
+			_ = json.NewEncoder(diagnostics).Encode(values)
+		}
 		for {
 			select {
 			case <-ctx.Done():

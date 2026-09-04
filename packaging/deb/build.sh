@@ -17,7 +17,7 @@ install -m 0600 packaging/deb/agent.yaml "$stage/etc/observe-agent/agent.yaml"
 install -m 0644 packaging/deb/observe-agent.service "$stage/lib/systemd/system/observe-agent.service"
 for script in postinst prerm postrm; do install -m 0755 "packaging/deb/$script" "$stage/DEBIAN/$script"; done
 printf '/etc/observe-agent/agent.yaml\n' > "$stage/DEBIAN/conffiles"
-printf 'Package: observe-agent\nVersion: %s\nArchitecture: amd64\nMaintainer: Observe Agent Canary <canary@example.invalid>\nDepends: passwd, ca-certificates, systemd\nSection: admin\nPriority: optional\nDescription: Observe Linux metrics-only canary (not a production release)\n' "$version" > "$stage/DEBIAN/control"
+printf 'Package: observe-agent\nVersion: %s\nArchitecture: amd64\nMaintainer: Observe Agent Canary <canary@example.invalid>\nDepends: passwd, ca-certificates, systemd\nSection: admin\nPriority: optional\nDescription: Observe Linux host metrics and opt-in file logs canary (not a production release)\n' "$version" > "$stage/DEBIAN/control"
 install -m 0644 packaging/deb/README.md "$stage/usr/share/doc/observe-agent/README.md"
 dpkg-deb --root-owner-group -Zgzip -z6 --build "$stage" "$out/observe-agent_${version}_amd64.deb"
 sha256sum "$out/observe-agent_${version}_amd64.deb"

@@ -15,6 +15,9 @@ echo 'PASS: default invalid config fails closed; install does not start/enable'
 systemctl reset-failed observe-agent
 test "$(stat -c '%a %U:%G' /etc/observe-agent/agent.yaml)" = '640 root:observe-agent'
 test "$(stat -c '%a %U:%G' /var/lib/observe-agent/metrics)" = '700 observe-agent:observe-agent'
+test "$(stat -c '%a %U:%G' /var/lib/observe-agent/logs)" = '700 observe-agent:observe-agent'
+test "$(stat -c '%a %U:%G' /var/lib/observe-agent/logs/checkpoints)" = '700 observe-agent:observe-agent'
+test "$(stat -c '%a %U:%G' /var/lib/observe-agent/logs/queue)" = '700 observe-agent:observe-agent'
 test "$(id -u observe-agent)" -ne 0
 test "$(getent passwd observe-agent | cut -d: -f7)" = /usr/sbin/nologin
 
@@ -30,13 +33,24 @@ chmod 0640 /etc/observe-agent/agent.yaml
 # AGENTV1 START: deployment-scoped v2 package fixture, never real credentials.
 sed -i '/^observe:/a\  backend_id: fixture-backend\n  organization_id: fixture-org' /etc/observe-agent/agent.yaml
 # AGENTV1 END: fixture identity
+install -d -o root -g observe-agent -m 0750 /var/log/observe-agent-package-test
+printf 'package-file-log-fixture\n' > /var/log/observe-agent-package-test/application.log
+chown root:observe-agent /var/log/observe-agent-package-test/application.log
+chmod 0640 /var/log/observe-agent-package-test/application.log
+sed -i '/^  logs:/,/^  traces:/c\  logs:\n    enabled: true\n    state_directory: /var/lib/observe-agent/logs\n    queue_bytes: 1048576\n    queue_items: 16\n    poll_interval: 200ms\n    max_files: 8\n    files:\n      - id: package-test\n        root: /var/log/observe-agent-package-test\n        include: ["*.log"]\n        start_at: beginning\n        max_open_files: 4\n        max_line_bytes: 4096\n        multiline:\n          enabled: false\n          flush_timeout: 1s\n          max_lines: 20\n          max_bytes: 4096\n  traces:' /etc/observe-agent/agent.yaml
 runuser -u observe-agent -- /usr/bin/observe-agent --check --config /etc/observe-agent/agent.yaml
 systemctl start observe-agent
 sleep 12
 systemctl is-active --quiet observe-agent
 pid=$(systemctl show observe-agent -p MainPID --value)
 test "$(stat -c %U /proc/"$pid")" = observe-agent
-node -e 'const s=require("/tmp/fixture-summary.json");if(s.accepted<1||s.points<1||s.hosts.length!==1||s.secretInPayload)process.exit(1);console.log("PASS: restricted service -> real host metrics -> TLS",{accepted:s.accepted,points:s.points,hosts:s.hosts.length})'
+# Agent may own an outbound HTTPS socket, but must never own a listening socket.
+find /proc/"$pid"/fd -maxdepth 1 -type l -printf '%l\n' | sed -n 's/^socket:\[\([0-9][0-9]*\)\]$/\1/p' > /tmp/agent-socket-inodes
+if awk 'NR > 1 && $4 == "0A" { print $10 }' /proc/"$pid"/net/tcp /proc/"$pid"/net/tcp6 | grep -Fxf /tmp/agent-socket-inodes; then
+  echo 'Observe Agent unexpectedly owns a listening TCP socket' >&2
+  exit 1
+fi
+node -e 'const s=require("/tmp/fixture-summary.json");if(s.accepted<1||s.points<1||s.logsAccepted<1||s.logRecords<1||s.hosts.length!==1||s.secretInPayload)process.exit(1);console.log("PASS: restricted service -> metrics and allowlisted file Logs -> TLS",{accepted:s.accepted,points:s.points,logsAccepted:s.logsAccepted,logRecords:s.logRecords,hosts:s.hosts.length})'
 systemctl status observe-agent --no-pager
 # Test both references under real systemd. Invalid inline value must be ignored.
 printf 'OBSERVE_API_KEY=package-test-key-not-real\n' > /etc/observe-agent/env
@@ -57,20 +71,25 @@ sleep 6
 test "$(node -p 'require("/tmp/fixture-summary.json").accepted')" -gt "$accepted"
 echo 'PASS: inline, EnvironmentFile and private secret reference under systemd'
 touch /tmp/fixture-unavailable
+printf 'retained-across-package-reinstall\n' >> /var/log/observe-agent-package-test/application.log
 sleep 10
 systemctl stop observe-agent
 test "$(systemctl is-active observe-agent)" = inactive
 test "$(find /var/lib/observe-agent/metrics -name '*.rec' | wc -l)" -gt 0
+test "$(find /var/lib/observe-agent/logs/queue -name '*.lrec' | wc -l)" -gt 0
 before=$(sha256sum /etc/observe-agent/agent.yaml | cut -d' ' -f1)
 find /var/lib/observe-agent/metrics -type f -name '*.rec' -exec sha256sum '{}' \; > /tmp/retained-checksums
+find /var/lib/observe-agent/logs -type f \( -name '*.lrec' -o -name '*.json' \) -exec sha256sum '{}' \; > /tmp/retained-log-checksums
 old_uid=$(id -u observe-agent)
 dpkg --remove observe-agent
 test -f /etc/observe-agent/agent.yaml
 sha256sum --check /tmp/retained-checksums >/dev/null
+sha256sum --check /tmp/retained-log-checksums >/dev/null
 dpkg -i "$deb"
 test "$(sha256sum /etc/observe-agent/agent.yaml | cut -d' ' -f1)" = "$before"
 test "$(id -u observe-agent)" = "$old_uid"
 sha256sum --check /tmp/retained-checksums >/dev/null
+sha256sum --check /tmp/retained-log-checksums >/dev/null
 test "$(systemctl is-active observe-agent)" = inactive
 rm /tmp/fixture-unavailable
 systemctl start observe-agent
@@ -85,6 +104,7 @@ test -s /tmp/observe-test-journal
 if grep -Eq 'package-test-key-not-real|ignored-inline-fixture' /tmp/observe-test-journal;then echo 'secret leaked to journal';exit 1;fi
 grep -q 'delivered_records' /tmp/observe-test-journal
 test -z "$(find /var/lib/observe-agent/metrics -type f ! -perm 0600 -print)"
+test -z "$(find /var/lib/observe-agent/logs -type f ! -perm 0600 -print)"
 echo 'PASS: stop/restart/status/journal; config/state/account survive remove/reinstall; no secret in journal'
 # Explicit purge removes conffile but never the spool/account.
 dpkg --purge observe-agent

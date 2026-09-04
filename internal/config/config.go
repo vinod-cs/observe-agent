@@ -41,6 +41,7 @@ type Config struct {
 	// AGENTV1 END: YAML credential carrier
 	// AGENTV1 START: bounded Linux metrics-only runtime configuration
 	Collection Collection  `json:"collection"`
+	Logs       LogsConfig  `json:"logs,omitempty"`
 	EC2        EC2Metadata `json:"ec2_metadata"`
 	Delivery   Delivery    `json:"delivery"`
 	// AGENTV1 END: bounded Linux metrics-only runtime configuration

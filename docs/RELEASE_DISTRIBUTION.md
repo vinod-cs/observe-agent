@@ -91,7 +91,7 @@ Get-Content ./dist/checksums/v0.1.0-canary.20260903.2/SHA256SUMS
 
 The PowerShell builder performs native cross-compilation, mounts the repo read-only into an ephemeral network-disabled Linux builder, and mounts only the version's package output writable. It never starts an installed Agent or touches an existing Docker stack. Neither build script invokes gh, Git, commits or uploads; the separate Actions-only publisher is described below. Both builders refuse pre-existing output directories to prevent stale assets mixing into a release. Review partial outputs before retrying; no automatic recursive cleanup of existing dist data occurs.
 
-The DEB is still a metrics-only canary with disabled/stopped service on install, restricted user, protected YAML, private durable state and preserved config/spool on remove/reinstall/upgrade. See [DEB installation/security guide](DEB_CANARY.md) and the unchanged `packaging/deb/observe-agent.service`.
+The DEB is a Linux host-metrics plus opt-in file-Logs canary with disabled/stopped service on install, restricted user, protected YAML, independent private Metrics/Logs state and preserved config/spools on remove/reinstall/upgrade. See [DEB installation/security guide](DEB_CANARY.md) and `packaging/deb/observe-agent.service`.
 
 ## Linux bootstrap
 

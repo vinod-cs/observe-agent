@@ -6,6 +6,7 @@ require (
 	github.com/shirou/gopsutil/v4 v4.26.5
 	go.opentelemetry.io/collector/pdata v1.60.0
 	go.yaml.in/yaml/v3 v3.0.5
+	golang.org/x/sys v0.45.0
 )
 
 require (
@@ -22,5 +23,4 @@ require (
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	go.opentelemetry.io/collector/featuregate v1.60.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/sys v0.45.0 // indirect
 )

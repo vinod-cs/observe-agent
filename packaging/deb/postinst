@@ -14,11 +14,11 @@ case "${1:-}" in
   test "$(id -gn observe-agent)" = observe-agent
   test "$(getent group observe-agent | cut -d: -f3)" -lt 1000
   case "$(getent group observe-agent | cut -d: -f4)" in ''|observe-agent) :;; *) echo 'Unexpected credential-reader group members; refusing setup' >&2;exit 1;; esac
-  for p in /etc/observe-agent /var/lib/observe-agent /var/lib/observe-agent/metrics; do
+  for p in /etc/observe-agent /var/lib/observe-agent /var/lib/observe-agent/metrics /var/lib/observe-agent/logs /var/lib/observe-agent/logs/checkpoints /var/lib/observe-agent/logs/queue; do
     test ! -L "$p" || { echo 'Unsafe Agent path; refusing setup' >&2; exit 1; }
   done
   install -d -o root -g observe-agent -m 0750 /etc/observe-agent
-  install -d -o observe-agent -g observe-agent -m 0700 /var/lib/observe-agent /var/lib/observe-agent/metrics
+  install -d -o observe-agent -g observe-agent -m 0700 /var/lib/observe-agent /var/lib/observe-agent/metrics /var/lib/observe-agent/logs /var/lib/observe-agent/logs/checkpoints /var/lib/observe-agent/logs/queue
   # Only file metadata changes: dpkg owns conffile content preservation.
   if test -f /etc/observe-agent/agent.yaml; then
     test ! -L /etc/observe-agent/agent.yaml

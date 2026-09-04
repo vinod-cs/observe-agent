@@ -19,17 +19,18 @@
 | Path / identity | Ownership / permissions | Purpose |
 |---|---|---|
 | `observe-agent` user/group | System UID/GID; non-root; `/usr/sbin/nologin` | Dedicated service identity; no login or extra capabilities |
-| `/usr/bin/observe-agent` | root:root `0755` | Metrics-only executable |
+| `/usr/bin/observe-agent` | root:root `0755` | Host metrics and opt-in Linux file Logs executable |
 | `/etc/observe-agent` | root:observe-agent `0750` | Protected configuration directory |
 | `/etc/observe-agent/agent.yaml` | root:observe-agent `0640` | dpkg conffile; readable by service, not writable by service |
 | `/var/lib/observe-agent` | observe-agent:observe-agent `0700` | Persistent private state |
 | `/var/lib/observe-agent/metrics` | observe-agent:observe-agent `0700`; files `0600` | Durable queue, manifest, lock and recovery files |
+| `/var/lib/observe-agent/logs` | observe-agent:observe-agent `0700`; files `0600` | Independent Logs queue and checkpoints |
 | `/lib/systemd/system/observe-agent.service` | root:root `0644` | Packaged unit (may resolve under `/usr/lib` on merged-/usr systems) |
 | `/usr/share/doc/observe-agent/README.md` | root:root `0644` | Installed short operator guide |
 | `/etc/observe-agent/env` (optional, operator-created) | root:root `0600` | systemd EnvironmentFile |
 | `/etc/observe-agent/api-key` (optional, operator-created) | root:observe-agent `0640` | Secret-file reference |
 
-The package creates the user/directories/unit automatically. It refuses unsafe symlinks and unexpected pre-existing service identities/groups. It never touches `/usr/local/bin/agent-i`, `/etc/agent-i`, existing agent-i checkpoints or `agent-i.service`. Application log files are not collected and no trace receiver or inbound service is registered.
+The package creates the user/directories/unit automatically. It refuses unsafe symlinks and unexpected pre-existing service identities/groups. It never touches `/usr/local/bin/agent-i`, `/etc/agent-i`, existing agent-i checkpoints or `agent-i.service`. Application log files are read only when an operator explicitly enables and allowlists a Logs source; no trace receiver or inbound service is registered.
 
 The archive contains executable, YAML, unit, README and dpkg lifecycle scripts/conffile declaration. State/user are created at configure time, not shipped with machine-specific IDs. The archive root has mode `0755`; the YAML is private even before postinst applies its service-readable group.
 
@@ -66,7 +67,7 @@ Initial setup also requires stable `observe.backend_id` and the actual `observe.
 
 For the EC2 identity canary, additionally set `ec2_metadata.required: true`: metadata failure must stop the candidate instead of using its supported machine-ID fallback. Do not set a fabricated host/Agent ID. Real IMDSv2 identity must remain the EC2 instance ID.
 
-The frontend accepts strict block-style YAML, not the old agent-i YAML schema. Existing normalized JSON remains supported. Unknown/duplicate keys, anchors/aliases, merge keys, custom scalar tags, multiple documents, and logs/traces enablement are rejected. Size/depth/node bounds apply. YAML/private key files require safe Linux ownership/mode and cannot be symlinks. No automatic legacy config import or rewrite occurs.
+The frontend accepts strict block-style YAML, not the old agent-i YAML schema. Existing normalized JSON remains supported. Unknown/duplicate keys, anchors/aliases, merge keys, custom scalar tags, and multiple documents are rejected. Linux file Logs use the strict schema documented in [Linux file Logs](LINUX_FILE_LOGS.md); traces enablement is rejected. Size/depth/node bounds apply. YAML/private key files require safe Linux ownership/mode and cannot be symlinks. No automatic legacy config import or rewrite occurs.
 
 ### Credentials
 
@@ -129,7 +130,7 @@ All tests used local fixtures or isolated Linux; no live organization key/AWS en
 | Linux AMD64 / ARM64 and Windows AMD64 compilation | PASS (ARM64/Windows collectors not added) |
 | Strict YAML, malformed input, unknown/duplicate fields, redacted format/errors | PASS |
 | Inline/env/file precedence and unsafe private-file modes | PASS |
-| Existing IMDSv2, exact identity, metrics-only and OTLP contract regressions | PASS using fixtures; not live EC2 |
+| Existing IMDSv2, exact identity, Metrics/Logs and OTLP contract regressions | PASS using fixtures; not live EC2 |
 | Existing 401/422/429/503/network, crash/replay, corruption, saturation, shutdown tests | PASS |
 | Fresh DEB install, disabled/stopped service, default invalid start | PASS |
 | Real systemd restricted user, start/stop/restart/status/journal | PASS |
