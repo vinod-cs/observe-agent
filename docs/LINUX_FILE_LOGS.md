@@ -1,8 +1,10 @@
-<!-- AGENTV1 FILE START: implemented Linux File Logs v1 security, durability, and operations. -->
-# Linux File Logs v1
+<!-- AGENTV1 FILE START: implemented Linux file/journald Logs v1 security, durability, and operations. -->
+# Linux Logs v1: files and journald
 
-Linux File Logs is an opt-in collector. It is disabled by default and does not
-open application files when disabled. It adds no listener or inbound port.
+Linux Logs is an opt-in collector. It is disabled by default and does not open
+application files or start a journal reader when disabled. It adds no listener
+or inbound port. File and journald sources feed the same standard OTLP Logs
+pipeline and independent durable Logs queue.
 Metrics configuration, Metrics queue format/scope/migration, and Metrics failure
 handling remain independent.
 
@@ -21,6 +23,12 @@ collection:
     overflow_policy: reject_new
     poll_interval: 1s
     max_files: 256
+    journald:
+      enabled: true
+      units: ["sshd.service", "my-application.service"]
+      identifiers: ["sshd", "my-application"]
+      priority: warning # 0..7 or emerg..debug; empty means all
+      start_at: end     # beginning or end on first start; cursor thereafter
     files:
       - id: application
         root: /var/log/my-application
@@ -42,6 +50,29 @@ collection:
 The restricted `observe-agent` account needs directory traversal and read access
 only for the configured roots/files. Grant a targeted group or ACL; do not run the
 Agent as root and do not broaden permissions on unrelated logs.
+
+### Journald access
+
+The DEB does not add the service account to a privileged group. An operator must
+grant only the journal access required by local policy. On common systemd Linux
+distributions, the explicit group-based option is:
+
+```bash
+sudo usermod -aG systemd-journal observe-agent
+sudo systemctl restart observe-agent
+sudo -u observe-agent journalctl --unit=sshd.service --lines=1 --no-pager
+```
+
+An administrator may use a narrower journal ACL instead. If access is absent,
+the reader records a permission/reader error and retries with a bounded delay;
+Metrics and file Logs remain independent. The Agent never changes journal group
+membership or ACLs itself.
+
+Journald invokes the installed `journalctl` executable directly with fixed,
+validated argument values. No shell is used and values are not interpolated.
+`units`, `identifiers`, and `priority` are optional allow/filter inputs. The
+collector emits only a bounded metadata allowlist (`systemd.unit`, syslog
+identifier/priority, PID, command name, and transport); it never emits the cursor.
 
 ## Security boundary
 
@@ -88,6 +119,14 @@ batch is acknowledged, rejected records are counted, and the batch is not retrie
 Delivery is at-least-once. A remote acceptance followed by local acknowledgement
 loss may replay a record after restart; exactly-once delivery is not claimed.
 
+Journald uses the same ordering. Its stable admission identity is derived from
+the journal cursor. The cursor is fsynced to
+`/var/lib/observe-agent/logs/checkpoints/journald.json` only after the OTLP record
+has been durably admitted; the queue record is then activated. On restart the
+saved cursor is supplied as `--after-cursor`, and any admitted-but-not-activated
+record is activated before reading resumes. Queue-full and checkpoint failures
+never advance the cursor.
+
 ## OTLP and provenance
 
 Serialization uses `go.opentelemetry.io/collector/pdata/plog` v1.60.0. Resource
@@ -100,8 +139,11 @@ checkpointed, logged, or placed in telemetry.
 ## Current limits
 
 - Linux only; Windows and macOS compile-safe builds reject Logs at runtime.
-- Plain files only; journald, containers, compression, recursive globs, encodings,
-  and general transformation pipelines are intentionally out of scope.
+- Linux files and systemd journald only. Containers, Windows Event Log, macOS
+  unified logging, compression, recursive globs, encodings, and general
+  transformation pipelines remain out of scope.
+- Journal access varies by distribution and local retention policy. `start_at:
+  beginning` can read only entries still retained by journald.
 - Per-record severity/JSON parsing is deferred; the complete line/multiline message
   is preserved for backend normalization.
 - Package validation is local/isolated. Live production Logs acceptance still

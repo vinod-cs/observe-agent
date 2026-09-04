@@ -25,6 +25,14 @@ collection:
     overflow_policy: reject_new
     poll_interval: 1s
     max_files: 256
+    # journald uses the same durable Logs queue. The service account must be
+    # granted journal read access explicitly by the operator.
+    journald:
+      enabled: false
+      units: []
+      identifiers: []
+      priority: ""
+      start_at: end
     files: []
     # Example (direct children of an explicit authorization root only):
     # files:

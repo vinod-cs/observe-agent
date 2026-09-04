@@ -7,6 +7,7 @@ type LogCounters struct {
 	FilesDiscovered, FilesOpen, RecordsRead, RecordsQueued, RecordsDelivered atomic.Uint64
 	RecordsRetried, RecordsRejectedLocal, PermissionErrors, CheckpointErrors atomic.Uint64
 	QueueRejected, AuthenticationPaused, MultilineFlushes                    atomic.Uint64
+	JournalRecordsRead, JournalReaderErrors, JournalCheckpointErrors         atomic.Uint64
 }
 
 func (c *LogCounters) Snapshot(delivery *Counters) map[string]uint64 {
@@ -18,6 +19,7 @@ func (c *LogCounters) Snapshot(delivery *Counters) map[string]uint64 {
 		"records_dropped": localRejected + serverRejected, "records_rejected_local": localRejected, "records_rejected_server": serverRejected,
 		"permission_errors": c.PermissionErrors.Load(), "checkpoint_errors": c.CheckpointErrors.Load(), "queue_rejected": c.QueueRejected.Load(),
 		"authentication_paused": c.AuthenticationPaused.Load(), "multiline_flushes": c.MultilineFlushes.Load(),
+		"journal_records_read": c.JournalRecordsRead.Load(), "journal_reader_errors": c.JournalReaderErrors.Load(), "journal_checkpoint_errors": c.JournalCheckpointErrors.Load(),
 	}
 }
 

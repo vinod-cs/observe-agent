@@ -112,6 +112,37 @@ func TestLinuxLogsYAMLSchema(t *testing.T) {
 		}
 	}
 }
+
+func TestLinuxJournaldYAMLSchema(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux journald configuration")
+	}
+	raw := strings.Replace(yamlValid, "logs:\n    enabled: false", `logs:
+    enabled: true
+    journald:
+      enabled: true
+      units: ["sshd.service", "checkout.service"]
+      identifiers: ["sshd"]
+      priority: warning
+      start_at: beginning`, 1)
+	c, err := Parse(strings.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	j := c.LogsRuntime().Journald
+	if !j.Enabled || j.StartAt != "beginning" || len(j.Units) != 2 || j.Priority != "warning" {
+		t.Fatalf("journald mapping: %+v", j)
+	}
+	for _, mutation := range []string{"bad unit;rm", "bad/unit", "bad unit"} {
+		candidate := strings.Replace(raw, "sshd.service", mutation, 1)
+		if _, err := Parse(strings.NewReader(candidate)); err == nil {
+			t.Fatalf("unsafe journald filter accepted: %q", mutation)
+		}
+	}
+	if _, err := Parse(strings.NewReader(strings.Replace(raw, "priority: warning", "priority: verbose", 1))); err == nil {
+		t.Fatal("invalid journal priority accepted")
+	}
+}
 func TestYAMLReferencePrecedence(t *testing.T) {
 	s := strings.Replace(yamlValid, "  api_key:", "  api_key_env: YAML_TEST_KEY\n  api_key_file: "+filepath.ToSlash(filepath.Join(t.TempDir(), "not-read"))+"\n  api_key:", 1)
 	c, e := Parse(strings.NewReader(s))

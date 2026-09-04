@@ -28,4 +28,20 @@ func TestLogJSONGoldenShape(t *testing.T) {
 	}
 }
 
+func TestJournaldLogJSONUsesStandardPdataWithoutFileFields(t *testing.T) {
+	raw, err := LogJSON(LogRecord{Body: "journal fixture", SourceID: "journald", SourceType: "journald", ObservedAt: time.Unix(10, 0).UTC(), ServiceName: "sshd", SeverityText: "WARN", Attributes: map[string]string{"systemd.unit": "sshd.service", "log.syslog.priority": "4"}}, map[string]string{"host.id": "i-0123456789abcdef0"}, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	for _, want := range []string{"observe-agent.journald", "journal fixture", "sshd.service", "WARN", "journald"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %s", want)
+		}
+	}
+	if strings.Contains(text, "log.file.path") {
+		t.Fatal("journald record acquired file-log fields")
+	}
+}
+
 // AGENTV1 FILE END

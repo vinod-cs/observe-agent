@@ -17,6 +17,7 @@ import (
 	"github.com/agent-i/agent/internal/config"
 	"github.com/agent-i/agent/internal/exporter"
 	"github.com/agent-i/agent/internal/identity"
+	"github.com/agent-i/agent/internal/journaltail"
 	"github.com/agent-i/agent/internal/logtail"
 	"github.com/agent-i/agent/internal/pipeline"
 	"github.com/agent-i/agent/internal/platform"
@@ -35,6 +36,7 @@ type Logs struct {
 	httpClient *http.Client
 	queue      *queue.LogDisk
 	tailers    []*logtail.Tailer
+	journal    *journaltail.Reader
 	cancel     context.CancelFunc
 	done       chan struct{}
 	blocked    atomic.Bool
@@ -85,8 +87,8 @@ func (l *Logs) Start(parent context.Context) error {
 	l.resource = resolved.Resource("linux", runtime.GOARCH, version.Version, "")
 	scope := queue.Scope{BackendID: l.cfg.Exporter.BackendID, OrganizationID: l.cfg.Exporter.OrganizationID, HostID: l.resource["host.id"], Account: l.resource["cloud.account.id"], Region: l.resource["cloud.region"]}
 	logsCfg := l.cfg.LogsRuntime()
-	if len(logsCfg.Sources) == 0 {
-		return errors.New("logs enabled without file sources")
+	if len(logsCfg.Sources) == 0 && !logsCfg.Journald.Enabled {
+		return errors.New("logs enabled without file or journald sources")
 	}
 	spool, err := queue.OpenLogDisk(filepath.Join(logsCfg.StateDirectory, "queue"), scope, logsCfg.QueueBytes, logsCfg.QueueItems)
 	if err != nil {
@@ -123,7 +125,30 @@ func (l *Logs) Start(parent context.Context) error {
 		}
 		l.tailers = append(l.tailers, tailer)
 	}
-	if len(l.tailers) == 0 {
+	if logsCfg.Journald.Enabled {
+		journal := journaltail.New(logsCfg.Journald, checkpointDir, func(ctx context.Context, record journaltail.Record) error {
+			raw, err := pipeline.LogJSON(pipeline.LogRecord{Body: record.Body, SourceID: "journald", SourceType: "journald", ObservedAt: record.ObservedAt, ServiceName: record.ServiceName, SeverityText: record.SeverityText, Attributes: record.Attributes}, l.resource, l.cfg.Limits.RequestBytes)
+			if err != nil {
+				l.stats.RecordsRejectedLocal.Add(1)
+				return nil
+			}
+			_, existed, err := l.queue.PutAdmission(ctx, record.AdmissionID, raw)
+			if err != nil {
+				l.stats.QueueRejected.Add(1)
+				return err
+			}
+			if !existed {
+				l.stats.RecordsQueued.Add(1)
+			}
+			return nil
+		}, l.queue.Activate)
+		if err = journal.Start(ctx); err != nil {
+			l.stats.PermissionErrors.Add(1)
+		} else {
+			l.journal = journal
+		}
+	}
+	if len(l.tailers) == 0 && l.journal == nil {
 		cancel()
 		<-l.done
 		l.queue.Close(context.Background())
@@ -186,6 +211,11 @@ func (l *Logs) Stop(ctx context.Context) error {
 			result = err
 		}
 	}
+	if l.journal != nil {
+		if err := l.journal.Stop(ctx); err != nil {
+			result = err
+		}
+	}
 	cancel()
 	select {
 	case <-l.done:
@@ -209,6 +239,16 @@ func (l *Logs) Snapshot() map[string]uint64 {
 		permissions += s.PermissionErrors
 		checkpoints += s.CheckpointErrors
 		multiline += s.MultilineFlushes
+	}
+	if l.journal != nil {
+		s := l.journal.Stats()
+		read += s.RecordsRead
+		rejected += s.RecordsRejectedLocal
+		permissions += s.PermissionErrors
+		checkpoints += s.CheckpointErrors
+		l.stats.JournalRecordsRead.Store(s.RecordsRead)
+		l.stats.JournalReaderErrors.Store(s.ReaderErrors)
+		l.stats.JournalCheckpointErrors.Store(s.CheckpointErrors)
 	}
 	l.stats.FilesDiscovered.Store(discovered)
 	l.stats.FilesOpen.Store(open)

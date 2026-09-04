@@ -20,6 +20,13 @@ test "$(stat -c '%a %U:%G' /var/lib/observe-agent/logs/checkpoints)" = '700 obse
 test "$(stat -c '%a %U:%G' /var/lib/observe-agent/logs/queue)" = '700 observe-agent:observe-agent'
 test "$(id -u observe-agent)" -ne 0
 test "$(getent passwd observe-agent | cut -d: -f7)" = /usr/sbin/nologin
+# Package installation must never grant journal access implicitly. This
+# disposable test then models an explicit operator grant.
+if id -nG observe-agent | tr ' ' '\n' | grep -Fx systemd-journal; then
+  echo 'Package unexpectedly granted systemd-journal membership' >&2
+  exit 1
+fi
+usermod -aG systemd-journal observe-agent
 
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=localhost -addext 'subjectAltName=IP:127.0.0.1' -keyout /tmp/fixture.key -out /tmp/fixture.crt >/dev/null 2>&1
 chmod 0600 /tmp/fixture.key
@@ -37,20 +44,26 @@ install -d -o root -g observe-agent -m 0750 /var/log/observe-agent-package-test
 printf 'package-file-log-fixture\n' > /var/log/observe-agent-package-test/application.log
 chown root:observe-agent /var/log/observe-agent-package-test/application.log
 chmod 0640 /var/log/observe-agent-package-test/application.log
-sed -i '/^  logs:/,/^  traces:/c\  logs:\n    enabled: true\n    state_directory: /var/lib/observe-agent/logs\n    queue_bytes: 1048576\n    queue_items: 16\n    poll_interval: 200ms\n    max_files: 8\n    files:\n      - id: package-test\n        root: /var/log/observe-agent-package-test\n        include: ["*.log"]\n        start_at: beginning\n        max_open_files: 4\n        max_line_bytes: 4096\n        multiline:\n          enabled: false\n          flush_timeout: 1s\n          max_lines: 20\n          max_bytes: 4096\n  traces:' /etc/observe-agent/agent.yaml
+logger -t observe-journald-package-test 'package-journal-log-fixture'
+sed -i '/^  logs:/,/^  traces:/c\  logs:\n    enabled: true\n    state_directory: /var/lib/observe-agent/logs\n    queue_bytes: 1048576\n    queue_items: 16\n    poll_interval: 200ms\n    max_files: 8\n    journald:\n      enabled: true\n      identifiers: ["observe-journald-package-test"]\n      priority: info\n      start_at: beginning\n    files:\n      - id: package-test\n        root: /var/log/observe-agent-package-test\n        include: ["*.log"]\n        start_at: beginning\n        max_open_files: 4\n        max_line_bytes: 4096\n        multiline:\n          enabled: false\n          flush_timeout: 1s\n          max_lines: 20\n          max_bytes: 4096\n  traces:' /etc/observe-agent/agent.yaml
 runuser -u observe-agent -- /usr/bin/observe-agent --check --config /etc/observe-agent/agent.yaml
 systemctl start observe-agent
 sleep 12
 systemctl is-active --quiet observe-agent
 pid=$(systemctl show observe-agent -p MainPID --value)
 test "$(stat -c %U /proc/"$pid")" = observe-agent
+# Enabled journald must run as the restricted Agent service child.
+if ! ps --ppid "$pid" -o comm= | grep -Fx journalctl; then
+  echo 'Enabled journald reader is not running' >&2
+  exit 1
+fi
 # Agent may own an outbound HTTPS socket, but must never own a listening socket.
 find /proc/"$pid"/fd -maxdepth 1 -type l -printf '%l\n' | sed -n 's/^socket:\[\([0-9][0-9]*\)\]$/\1/p' > /tmp/agent-socket-inodes
 if awk 'NR > 1 && $4 == "0A" { print $10 }' /proc/"$pid"/net/tcp /proc/"$pid"/net/tcp6 | grep -Fxf /tmp/agent-socket-inodes; then
   echo 'Observe Agent unexpectedly owns a listening TCP socket' >&2
   exit 1
 fi
-node -e 'const s=require("/tmp/fixture-summary.json");if(s.accepted<1||s.points<1||s.logsAccepted<1||s.logRecords<1||s.hosts.length!==1||s.secretInPayload)process.exit(1);console.log("PASS: restricted service -> metrics and allowlisted file Logs -> TLS",{accepted:s.accepted,points:s.points,logsAccepted:s.logsAccepted,logRecords:s.logRecords,hosts:s.hosts.length})'
+node -e 'const s=require("/tmp/fixture-summary.json");if(s.accepted<1||s.points<1||s.logsAccepted<2||s.logRecords<2||s.hosts.length!==1||s.secretInPayload)process.exit(1);console.log("PASS: restricted service -> metrics plus allowlisted file/journald Logs -> TLS",{accepted:s.accepted,points:s.points,logsAccepted:s.logsAccepted,logRecords:s.logRecords,hosts:s.hosts.length})'
 systemctl status observe-agent --no-pager
 # Test both references under real systemd. Invalid inline value must be ignored.
 printf 'OBSERVE_API_KEY=package-test-key-not-real\n' > /etc/observe-agent/env

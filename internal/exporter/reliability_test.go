@@ -52,4 +52,44 @@ func TestLogsPartialSuccessIsFinal(t *testing.T) {
 	}
 }
 
+func TestLogsAuthenticationAndTransientReplaySemantics(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		statuses []int
+		want     Outcome
+	}{
+		{"unauthorized", []int{401}, Unauthorized},
+		{"forbidden", []int{403}, Unauthorized},
+		{"throttled then accepted", []int{429, 201}, Accepted},
+		{"unavailable then accepted", []int{503, 201}, Accepted},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/v1/otlp/v1/logs" {
+					t.Error("wrong Logs endpoint")
+				}
+				status := tc.statuses[min(calls, len(tc.statuses)-1)]
+				calls++
+				if status == 429 {
+					w.Header().Set("Retry-After", "1")
+				}
+				w.WriteHeader(status)
+				if status == 201 {
+					_, _ = w.Write([]byte(`{"partialSuccess":{"rejectedLogRecords":0}}`))
+				}
+			}))
+			defer server.Close()
+			t.Setenv("TEST_INGEST", "ApiKey fixture-only")
+			cfg := testConfig(t, server.URL)
+			cfg.Policy.Enabled[policy.Logs] = true
+			sender := NewSignalSender(cfg, policy.Logs, security.Environment{}, &selftelemetry.Counters{}, server.Client())
+			sender.sleep = func(context.Context, time.Duration) bool { return true }
+			if got := sender.Send(context.Background(), []byte(`{"resourceLogs":[]}`)); got != tc.want {
+				t.Fatalf("outcome=%s calls=%d", got, calls)
+			}
+		})
+	}
+}
+
 // AGENTV1 FILE END

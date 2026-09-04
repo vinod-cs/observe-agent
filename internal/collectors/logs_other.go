@@ -16,7 +16,7 @@ func NewLogs(config.Config, *selftelemetry.LogCounters, *selftelemetry.Counters)
 	return &Logs{}
 }
 func (*Logs) Start(context.Context) error {
-	return errors.New("Linux file logs are unsupported on this platform")
+	return errors.New("Linux logs are unsupported on this platform")
 }
 func (*Logs) Stop(context.Context) error  { return nil }
 func (*Logs) Snapshot() map[string]uint64 { return map[string]uint64{} }

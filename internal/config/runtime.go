@@ -35,13 +35,24 @@ type Delivery struct {
 // LogsConfig is deliberately separate from Delivery: the existing Delivery
 // fields and limits continue to describe the metrics spool only.
 type LogsConfig struct {
-	StateDirectory     string      `json:"state_directory,omitempty"`
-	QueueBytes         int64       `json:"queue_bytes,omitempty"`
-	QueueItems         int         `json:"queue_items,omitempty"`
-	OverflowPolicy     string      `json:"overflow_policy,omitempty"`
-	PollIntervalMillis int         `json:"poll_interval_millis,omitempty"`
-	MaxFiles           int         `json:"max_files,omitempty"`
-	Sources            []LogSource `json:"files,omitempty"`
+	StateDirectory     string            `json:"state_directory,omitempty"`
+	QueueBytes         int64             `json:"queue_bytes,omitempty"`
+	QueueItems         int               `json:"queue_items,omitempty"`
+	OverflowPolicy     string            `json:"overflow_policy,omitempty"`
+	PollIntervalMillis int               `json:"poll_interval_millis,omitempty"`
+	MaxFiles           int               `json:"max_files,omitempty"`
+	Sources            []LogSource       `json:"files,omitempty"`
+	Journald           JournaldLogSource `json:"journald,omitempty"`
+}
+
+// JournaldLogSource is a single bounded Linux journal stream. Filters are
+// passed as literal journalctl arguments; they are never shell-expanded.
+type JournaldLogSource struct {
+	Enabled     bool     `json:"enabled,omitempty"`
+	Units       []string `json:"units,omitempty"`
+	Identifiers []string `json:"identifiers,omitempty"`
+	Priority    string   `json:"priority,omitempty"`
+	StartAt     string   `json:"start_at,omitempty"`
 }
 
 type LogSource struct {
@@ -106,10 +117,14 @@ func (c Config) LogsRuntime() LogsConfig {
 			s.Multiline.MaxBytes = 256 << 10
 		}
 	}
+	if l.Journald.StartAt == "" {
+		l.Journald.StartAt = "end"
+	}
 	return l
 }
 
 var logID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+var journalFilter = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.@:-]{0,255}$`)
 
 func validateLogPattern(v string) bool {
 	if v == "" || len(v) > 256 || strings.ContainsAny(v, "\\/\x00\r\n") || v == "." || v == ".." {
@@ -155,6 +170,20 @@ func (c Config) validateLogs() error {
 		}
 		if m.FlushTimeoutMillis < 100 || m.FlushTimeoutMillis > 60000 || m.MaxLines < 1 || m.MaxLines > 1000 || m.MaxBytes < 256 || m.MaxBytes > 1<<20 || m.MaxBytes > s.MaxLineBytes {
 			return errors.New("logs multiline limits invalid")
+		}
+	}
+	if len(l.Journald.Units) > 64 || len(l.Journald.Identifiers) > 64 || (l.Journald.StartAt != "beginning" && l.Journald.StartAt != "end") {
+		return errors.New("journald source limits invalid")
+	}
+	for _, value := range append(append([]string{}, l.Journald.Units...), l.Journald.Identifiers...) {
+		if !journalFilter.MatchString(value) {
+			return errors.New("journald filter invalid")
+		}
+	}
+	if l.Journald.Priority != "" {
+		valid := map[string]bool{"0": true, "1": true, "2": true, "3": true, "4": true, "5": true, "6": true, "7": true, "emerg": true, "alert": true, "crit": true, "err": true, "warning": true, "notice": true, "info": true, "debug": true}
+		if !valid[l.Journald.Priority] {
+			return errors.New("journald priority invalid")
 		}
 	}
 	return nil

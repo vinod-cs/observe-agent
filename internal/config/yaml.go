@@ -39,14 +39,15 @@ type yamlLogSource struct {
 	Multiline    yamlLogMultiline `json:"multiline"`
 }
 type yamlLogs struct {
-	Enabled        bool            `json:"enabled"`
-	StateDirectory string          `json:"state_directory"`
-	QueueBytes     int64           `json:"queue_bytes"`
-	QueueItems     int             `json:"queue_items"`
-	OverflowPolicy string          `json:"overflow_policy"`
-	PollInterval   string          `json:"poll_interval"`
-	MaxFiles       int             `json:"max_files"`
-	Files          []yamlLogSource `json:"files"`
+	Enabled        bool              `json:"enabled"`
+	StateDirectory string            `json:"state_directory"`
+	QueueBytes     int64             `json:"queue_bytes"`
+	QueueItems     int               `json:"queue_items"`
+	OverflowPolicy string            `json:"overflow_policy"`
+	PollInterval   string            `json:"poll_interval"`
+	MaxFiles       int               `json:"max_files"`
+	Files          []yamlLogSource   `json:"files"`
+	Journald       JournaldLogSource `json:"journald"`
 }
 type yamlFrontend struct {
 	AgentID string `json:"agent_id"`
@@ -160,7 +161,7 @@ func parseYAML(raw []byte) (Config, error) {
 		return Config{}, errors.New("observe authentication must be configured")
 	}
 	c := Config{AgentID: f.AgentID, Collection: Collection{IntervalSeconds: f.Collection.Interval}, EC2: f.EC2, Delivery: f.Delivery, Limits: f.Limits, Exporter: Exporter{Type: "otlp_http", Endpoint: f.Observe.Endpoint, HeadersEnv: map[string]string{"Authorization": "OBSERVE_CONFIG_CREDENTIAL"}}, Policy: policy.Document{Version: 1, Enabled: map[policy.Capability]bool{policy.Metrics: f.Collection.Metrics.Enabled, policy.Logs: f.Collection.Logs.Enabled, policy.Traces: false}}, yamlConfig: true, credential: security.NewCredential(f.Observe.APIKey, f.Observe.APIKeyEnv, f.Observe.APIKeyFile)}
-	logs := LogsConfig{StateDirectory: f.Collection.Logs.StateDirectory, QueueBytes: f.Collection.Logs.QueueBytes, QueueItems: f.Collection.Logs.QueueItems, OverflowPolicy: f.Collection.Logs.OverflowPolicy, MaxFiles: f.Collection.Logs.MaxFiles}
+	logs := LogsConfig{StateDirectory: f.Collection.Logs.StateDirectory, QueueBytes: f.Collection.Logs.QueueBytes, QueueItems: f.Collection.Logs.QueueItems, OverflowPolicy: f.Collection.Logs.OverflowPolicy, MaxFiles: f.Collection.Logs.MaxFiles, Journald: f.Collection.Logs.Journald}
 	if f.Collection.Logs.PollInterval != "" {
 		d, err := time.ParseDuration(f.Collection.Logs.PollInterval)
 		if err != nil {

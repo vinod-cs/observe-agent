@@ -1,7 +1,7 @@
 <!-- AGENTV1 FILE START: customer review, explicit implemented/proposed distinction -->
 # Permissions and operational security
 
-> Foundation review retained for history. For the implemented Linux metrics runtime, its exact OS reads and current network/write behavior, use [Linux metrics operational review](LINUX_METRICS.md). The no-sender/no-collector statements below apply only to the earlier foundation.
+> Foundation review retained for history. For current runtime behavior use [Linux metrics operational review](LINUX_METRICS.md) and [Linux Logs](LINUX_FILE_LOGS.md). The no-sender/no-collector statements below apply only to the earlier foundation.
 
 ## What this build actually does
 
@@ -18,7 +18,7 @@ The Linux adapters below run **only when invoked** by tests/future lifecycle wir
 | Filesystem capacity | Mount table (`/proc/self/mountinfo` or supported equivalent), statfs on approved mounts | Volume enumeration/free-space APIs; later statfs | Traverse/read allowed mount metadata; no filesystem writes or recursive file indexing; remote mounts need explicit policy |
 | Network counters | `/proc/net/dev`, interface metadata | Interface performance APIs; later route/sysctl | Read aggregate counters, not packets; no packet capture or network reconfiguration |
 | File logs | Customer allowlisted files/globs only; stat/open/read and file identity | Allowlisted files with read ACL; later same principle | Restricted account plus explicit file/group ACL; protected logs require targeted grants, not universal root |
-| journald | Approved local journal API/files | Not applicable | `systemd-journal` or explicit journal ACL only when enabled; no journal writes |
+| journald | Implemented direct, filtered `journalctl` JSON stream | Not applicable | `systemd-journal` or explicit journal ACL only when enabled; package never grants access; no journal writes or shell |
 | Windows Event Log | Not applicable | Explicit channel subscriptions/reads | Channel ACL or Event Log Readers where appropriate; Security channel may need additional grants; no clearing/modification |
 | OTLP traces | Enabled loopback listener; no process injection | Same listener boundary | Port above 1024 normally needs no elevation; app instrumentation sends traces; no automatic tracing of arbitrary processes |
 | Process inspection | Selected `/proc/<pid>` metadata | Process query APIs | Same-user access first; protected processes may need extra grants; never imply complete coverage under restricted access |

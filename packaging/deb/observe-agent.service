@@ -1,6 +1,6 @@
 # AGENTV1 FILE START: test DEB service, disabled on install; no inbound receivers.
 [Unit]
-Description=Observe Agent (host metrics and opt-in Linux file logs)
+Description=Observe Agent (host metrics and opt-in Linux file/journald logs)
 Wants=network-online.target
 After=network-online.target
 StartLimitIntervalSec=60

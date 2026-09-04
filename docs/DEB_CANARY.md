@@ -3,7 +3,7 @@
 
 > Queue-scope v2 supersedes the endpoint-scoped behavior of the historical artifact below. See [one-time migration](QUEUE_SCOPE_V2.md); old local DEBs do not contain the new implementation.
 
-**Test package, not a production release. No EC2 deployment or backend modification was performed.** This milestone adds delivery/install UX only; identity, metrics and durable delivery remain the existing implementations. No published release/download URL exists yet.
+**Test package, not a production release. No EC2 deployment or backend modification was performed.** The artifact section below retains the first local DEB evidence. Current validated canaries are published only by the tag-driven GitHub workflow; an environment approval alone is not a release.
 
 ## Artifact
 
@@ -19,7 +19,7 @@
 | Path / identity | Ownership / permissions | Purpose |
 |---|---|---|
 | `observe-agent` user/group | System UID/GID; non-root; `/usr/sbin/nologin` | Dedicated service identity; no login or extra capabilities |
-| `/usr/bin/observe-agent` | root:root `0755` | Host metrics and opt-in Linux file Logs executable |
+| `/usr/bin/observe-agent` | root:root `0755` | Host metrics and opt-in Linux file/journald Logs executable |
 | `/etc/observe-agent` | root:observe-agent `0750` | Protected configuration directory |
 | `/etc/observe-agent/agent.yaml` | root:observe-agent `0640` | dpkg conffile; readable by service, not writable by service |
 | `/var/lib/observe-agent` | observe-agent:observe-agent `0700` | Persistent private state |
@@ -30,7 +30,7 @@
 | `/etc/observe-agent/env` (optional, operator-created) | root:root `0600` | systemd EnvironmentFile |
 | `/etc/observe-agent/api-key` (optional, operator-created) | root:observe-agent `0640` | Secret-file reference |
 
-The package creates the user/directories/unit automatically. It refuses unsafe symlinks and unexpected pre-existing service identities/groups. It never touches `/usr/local/bin/agent-i`, `/etc/agent-i`, existing agent-i checkpoints or `agent-i.service`. Application log files are read only when an operator explicitly enables and allowlists a Logs source; no trace receiver or inbound service is registered.
+The package creates the user/directories/unit automatically. It refuses unsafe symlinks and unexpected pre-existing service identities/groups. It never touches `/usr/local/bin/agent-i`, `/etc/agent-i`, existing agent-i checkpoints or `agent-i.service`. Application files are read only when an operator explicitly enables and allowlists a file source. Journald is also disabled by default and requires an operator-granted `systemd-journal` group or equivalent ACL; package scripts never grant it automatically. No trace receiver or inbound service is registered.
 
 The archive contains executable, YAML, unit, README and dpkg lifecycle scripts/conffile declaration. State/user are created at configure time, not shipped with machine-specific IDs. The archive root has mode `0755`; the YAML is private even before postinst applies its service-readable group.
 
@@ -50,6 +50,12 @@ collection:
     enabled: true
   logs:
     enabled: false
+    journald:
+      enabled: false
+      units: []
+      identifiers: []
+      priority: ""
+      start_at: end
   traces:
     enabled: false
 
@@ -67,7 +73,7 @@ Initial setup also requires stable `observe.backend_id` and the actual `observe.
 
 For the EC2 identity canary, additionally set `ec2_metadata.required: true`: metadata failure must stop the candidate instead of using its supported machine-ID fallback. Do not set a fabricated host/Agent ID. Real IMDSv2 identity must remain the EC2 instance ID.
 
-The frontend accepts strict block-style YAML, not the old agent-i YAML schema. Existing normalized JSON remains supported. Unknown/duplicate keys, anchors/aliases, merge keys, custom scalar tags, and multiple documents are rejected. Linux file Logs use the strict schema documented in [Linux file Logs](LINUX_FILE_LOGS.md); traces enablement is rejected. Size/depth/node bounds apply. YAML/private key files require safe Linux ownership/mode and cannot be symlinks. No automatic legacy config import or rewrite occurs.
+The frontend accepts strict block-style YAML, not the old agent-i YAML schema. Existing normalized JSON remains supported. Unknown/duplicate keys, anchors/aliases, merge keys, custom scalar tags, and multiple documents are rejected. Linux file and journald Logs use the strict schema documented in [Linux Logs](LINUX_FILE_LOGS.md); traces enablement is rejected. Size/depth/node bounds apply. YAML/private key files require safe Linux ownership/mode and cannot be symlinks. No automatic legacy config import or rewrite occurs.
 
 ### Credentials
 
@@ -135,6 +141,7 @@ All tests used local fixtures or isolated Linux; no live organization key/AWS en
 | Fresh DEB install, disabled/stopped service, default invalid start | PASS |
 | Real systemd restricted user, start/stop/restart/status/journal | PASS |
 | Real Linux metrics -> isolated trusted HTTPS -> accepted | PASS; initial 3 batches / 364 points, one host identity |
+| Restricted systemd service -> allowlisted file plus journald -> isolated trusted HTTPS | PASS; both OTLP Logs records accepted; journal access granted explicitly by the test operator |
 | Inline + EnvironmentFile + private secret-file under systemd | PASS |
 | 503 backlog -> stop/remove/reinstall -> successful replay | PASS; conffile SHA, retained queue checksums and UID unchanged |
 | Journal secret absence, spool/file ownership/modes | PASS |
